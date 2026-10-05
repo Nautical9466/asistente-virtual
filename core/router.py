@@ -120,8 +120,10 @@ class VirtualAssistant:
         if not assistant_response:
             assistant_response = self._generate_local_fallback(user_input)
 
-        # Post-check: If LLM claimed consolidation/deletion without API execution, run cleanup
+        # Post-check: Clean any pipe tables into cards & execute cleanup if LLM claimed action
         if assistant_response:
+            import re
+            assistant_response = clean_markdown_formatting(assistant_response)
             low_resp = assistant_response.lower()
             if any(p in low_resp for p in ["he consolidado", "he eliminado", "he borrado"]):
                 try:
@@ -132,6 +134,43 @@ class VirtualAssistant:
 
         self.memory.add_interaction(user_id, user_input, assistant_response)
         return assistant_response
+
+def clean_markdown_formatting(text: str) -> str:
+    """Post-processor that converts any Markdown pipe tables (| col | col |) into clean bullet cards."""
+    if not text or '|' not in text:
+        return text
+
+    import re
+    lines = text.split('\n')
+    new_lines = []
+    in_table = False
+    headers = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('|') and stripped.endswith('|'):
+            if re.match(r'^\|[\s:\-|\-]+\|$', stripped):
+                in_table = True
+                continue
+            cells = [c.strip() for c in stripped.strip('|').split('|')]
+            if not in_table and not headers:
+                headers = cells
+                in_table = True
+                continue
+            if headers:
+                new_lines.append(f"\n📌 **{cells[0]}**:")
+                for h, val in zip(headers[1:], cells[1:]):
+                    if val and val != '-':
+                        new_lines.append(f"  • **{h}**: {val}")
+            else:
+                new_lines.append(f"• {', '.join(cells)}")
+        else:
+            if in_table:
+                in_table = False
+                headers = []
+            new_lines.append(line)
+
+    return '\n'.join(new_lines)
 
     def _generate_local_fallback(self, user_input: str) -> str:
         """Generates structured local response when API key is unconfigured or failing."""

@@ -60,6 +60,14 @@ class ContextLoader:
         prompt_parts = [base_prompt or default_base]
         if profile:
             prompt_parts.append(f"### PERFIL DEL USUARIO:\n{profile}")
-            prompt_parts.append(f"### MEMORIAS Persistentes:\n{memories}")
+        if memories:
+            prompt_parts.append(f"### MEMORIAS PERSISTENTES:\n{memories}")
+
+        prompt_parts.append(
+            "⚠️ REGLA CRÍTICA Y FINAL DE FORMATO:\n"
+            "NUNCA bajo ninguna circunstancia uses tablas con pipes (| col | col |). "
+            "Cualquier comparación o lista DEBE ser presentada en TARJETAS O LISTAS CON EMOJIS Y NEGRITAS. "
+            "Las tablas destruyen el formato visual en Telegram."
+        )
 
         return "\n\n".join(prompt_parts)
