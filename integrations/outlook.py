@@ -349,7 +349,36 @@ class OutlookIntegration:
             logger.error(f"[Outlook API] Fetch all lists exception: {e}")
             return self._fetch_outlook_tasks(headers, top=50)
 
+    def get_groups_explanation(self) -> str:
+        """Explains Microsoft Graph API limitations regarding List Groups vs Task Lists."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook:\n{err_detail}"
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        try:
+            res = requests.get(lists_url, headers=headers, timeout=10)
+            todo_lists = res.json().get("value", []) if res.status_code == 200 else []
+
+            lines = [
+                "📂 **EXPLICACIÓN SOBRE LOS GRUPOS DE LISTAS EN OUTLOOK TO-DO**",
+                "───────────────────────────\n",
+                "💡 **¿Qué son los Grupos de Listas?**",
+                "En la interfaz gráfica de Microsoft To-Do (como tu grupo *Negocios* que colapsa *Capitalero* y *Gorditas*), Microsoft permite crear agrupaciones de listas.\n",
+                "⚠️ **Limitación Técnica Oficial de Microsoft Graph API**:",
+                "Microsoft permite crear y gestionar **Listas de Tareas** y **Subtareas**, pero **NO ha publicado un endpoint en la API oficial** (`listGroups`) para crear o mover carpetas de 'Grupos de Listas' mediante código externo.\n",
+                "🎯 **Solución de Agrupamiento Recomendada**:",
+                "Para agrupar tus listas en la aplicación, usamos nombres estructurados con prefijos (ej: `Compras - MaxiPali`, `Compras - Mercado Ivan`, `Negocios - Capitalero`). Esto hace que Microsoft To-Do las ordene juntas automáticamente en tu barra lateral.\n",
+                "───────────────────────────",
+                f"📊 *Total de Listas individuales registradas*: `{len(todo_lists)}`"
+            ]
+            return "\n".join(lines)
+        except Exception as e:
+            return f"❌ Error al consultar listas: {e}"
+
     def _fetch_outlook_tasks(self, headers: dict, top: int = 25) -> tuple:
+
         """Fetches tasks from Microsoft Graph API with automatic retry fallback if 502 Bad Gateway occurs."""
         url_with_expand = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top={top}"
         url_simple = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top={top}"
