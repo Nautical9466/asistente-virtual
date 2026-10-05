@@ -182,7 +182,7 @@ class OutlookIntegration:
             return f"❌ Error de conexión al consultar Outlook: {e}"
 
     def get_tasks(self) -> str:
-        """Retrieves pending Outlook To-Do tasks from Microsoft Graph API."""
+        """Retrieves pending Outlook To-Do tasks with subtasks, notes, due dates, and recurrence via Microsoft Graph API."""
         token, err_detail = self._get_access_token_detail()
         if not token:
             return f"📋 **Tareas Outlook To-Do (Modo Simulación)**:\n{err_detail}"
@@ -192,7 +192,7 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
-        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top=25"
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top=30"
         try:
             res = requests.get(url, headers=headers)
             if res.status_code == 200:
@@ -201,24 +201,59 @@ class OutlookIntegration:
                     return "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**:\n\n🎉 ¡Excelente! No tienes tareas pendientes registradas."
 
                 lines = [
-                    "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**",
+                    "📋 **TUS TAREAS DETALLADAS (Outlook To-Do)**",
                     "───────────────────────────\n"
                 ]
+
+                import re
                 for idx, t in enumerate(tasks, start=1):
-                    title = t.get("title", "Sin título")
+                    title = t.get("title", "Sin título").strip()
                     status = t.get("status", "notStarted")
                     status_emoji = "⏳" if status == "inProgress" else "📌"
+
+                    card_lines = [f"{status_emoji} **{idx}. {title}**"]
+
+                    # 1. Due Date
                     due = t.get("dueDateTime", {}).get("dateTime", None)
                     if due:
                         try:
                             dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
-                            due_fmt = f" (Vence: `{dt.strftime('%d/%m/%Y')}`)"
+                            card_lines.append(f"   ⏰ *Vence*: `{dt.strftime('%d/%m/%Y')}`")
                         except Exception:
-                            due_fmt = f" (Vence: `{due[:10]}`)"
-                    else:
-                        due_fmt = ""
+                            card_lines.append(f"   ⏰ *Vence*: `{due[:10]}`")
 
-                    lines.append(f"{status_emoji} **{idx}. {title}**{due_fmt}\n")
+                    # 2. Recurrence
+                    rec = t.get("recurrence")
+                    if rec:
+                        rec_type = rec.get("pattern", {}).get("type", "")
+                        day = rec.get("pattern", {}).get("dayOfMonth", "")
+                        if "Monthly" in rec_type:
+                            card_lines.append(f"   🔄 *Recurrencia*: Mensual (Día {day})" if day else "   🔄 *Recurrencia*: Mensual")
+                        elif "Weekly" in rec_type:
+                            card_lines.append("   🔄 *Recurrencia*: Semanal")
+                        elif "Daily" in rec_type:
+                            card_lines.append("   🔄 *Recurrencia*: Diaria")
+                        else:
+                            card_lines.append(f"   🔄 *Recurrencia*: Activa ({rec_type})")
+
+                    # 3. Notes / Description
+                    body_content = t.get("body", {}).get("content", "").strip()
+                    if body_content:
+                        clean_notes = re.sub(r'<[^>]+>', '', body_content).strip()
+                        if clean_notes:
+                            card_lines.append(f"   📝 *Nota*: _{clean_notes}_")
+
+                    # 4. Subtasks / Checklist Items
+                    checklists = t.get("checklistItems", [])
+                    if checklists:
+                        card_lines.append("   🔹 *Subtareas:*")
+                        for item in checklists:
+                            sub_title = item.get("displayName", "").strip()
+                            is_checked = item.get("isChecked", False)
+                            icon = "☑️" if is_checked else "▫️"
+                            card_lines.append(f"     {icon} {sub_title}")
+
+                    lines.append("\n".join(card_lines) + "\n")
 
                 lines.append("───────────────────────────")
                 lines.append(f"💡 *Total de pendientes*: `{len(tasks)} tareas`")
