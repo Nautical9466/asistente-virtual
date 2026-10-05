@@ -53,8 +53,13 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
                 response = outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
-            elif any(w in low for w in ["expirada", "expiradas", "vencida", "vencidas", "atrasada", "atrasadas"]):
+            elif any(w in low for w in ["expirada", "expiradas", "vencida", "vencidas", "vencio", "venció", "vencido", "vencidos", "atrasada", "atrasadas", "atrasado", "atrasados", "oct 1", "1 de octubre", "1 oct", "octubre 1"]):
                 response = outlook.get_overdue_tasks()
+            elif low.startswith("buscar tarea:") or low.startswith("busca tarea:"):
+                search_q = user_text.split(":", 1)[1].strip()
+                response = outlook.search_tasks(search_q)
+            elif any(w in low for w in ["seguridad del terreno", "seguridad terreno", "pago de la seguridad", "sugerencia", "sugerencias"]):
+                response = outlook.search_tasks("seguridad")
             elif "desactivar recurrencia" in low or "quitar recurrencia" in low:
                 response = outlook.set_task_recurrence(user_text, enable=False)
             elif "activar recurrencia" in low or "hacer recurrente" in low:
@@ -71,6 +76,7 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             else:
                 # All conversational questions & queries are answered intelligently by AI (Groq/Gemini/Qwen)
                 response = message_handler_callback(user_text, user_id)
+
 
             await update.message.reply_text(response, parse_mode="Markdown")
 
