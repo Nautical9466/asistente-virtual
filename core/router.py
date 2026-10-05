@@ -67,7 +67,7 @@ class VirtualAssistant:
             try:
                 groq_key = os.environ.get("GROQ_API_KEY")
                 resp = litellm.completion(
-                    model="groq/openai/gpt-oss-120b",
+                    model="groq/openai/gpt-oss-20b",
                     messages=messages,
                     api_key=groq_key
                 )
