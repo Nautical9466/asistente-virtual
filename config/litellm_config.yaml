@@ -1,22 +1,22 @@
 model_list:
-  - model_name: cerebro-deepinfra-qwen
-    litellm_params:
-      model: "deepinfra/Qwen/Qwen2.5-32B-Instruct"
-      api_key: os.environ/DEEPINFRA_API_KEY
-      temperature: 0.15
-      max_tokens: 2000
-
   - model_name: cerebro-groq
     litellm_params:
-      model: "groq/llama-3.3-70b-versatile"
+      model: "groq/openai/gpt-oss-120b"
       api_key: os.environ/GROQ_API_KEY
       temperature: 0.15
       max_tokens: 2000
 
-  - model_name: cerebro-gemini
+  - model_name: cerebro-groq-qwen
     litellm_params:
-      model: "gemini/gemini-2.0-flash"
-      api_key: os.environ/GEMINI_API_KEY
+      model: "groq/qwen/qwen3.8-27b"
+      api_key: os.environ/GROQ_API_KEY
+      temperature: 0.15
+      max_tokens: 2000
+
+  - model_name: cerebro-groq-fast
+    litellm_params:
+      model: "groq/openai/gpt-oss-20b"
+      api_key: os.environ/GROQ_API_KEY
       temperature: 0.15
       max_tokens: 2000
 
@@ -26,5 +26,5 @@ litellm_settings:
   timeout: 30
 
 router_settings:
-  fallback_model: "cerebro-groq"
+  fallback_model: "cerebro-groq-fast"
   max_parallel_requests: 5

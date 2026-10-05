@@ -67,7 +67,7 @@ class VirtualAssistant:
             try:
                 groq_key = os.environ.get("GROQ_API_KEY")
                 resp = litellm.completion(
-                    model="groq/llama-3.3-70b-versatile",
+                    model="groq/openai/gpt-oss-120b",
                     messages=messages,
                     api_key=groq_key
                 )
@@ -81,7 +81,7 @@ class VirtualAssistant:
             try:
                 gemini_key = os.environ.get("GEMINI_API_KEY")
                 resp = litellm.completion(
-                    model="gemini/gemini-2.0-flash",
+                    model="gemini/gemini-flash-latest",
                     messages=messages,
                     api_key=gemini_key
                 )
