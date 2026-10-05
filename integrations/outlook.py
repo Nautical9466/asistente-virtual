@@ -207,8 +207,8 @@ class OutlookIntegration:
 
 
 
-    def create_task(self, title: str, description: str = "") -> str:
-        """Creates a Task in Outlook To-Do / Microsoft Tasks."""
+    def create_task(self, title: str, description: str = "", list_name: str = None) -> str:
+        """Creates a Task in Outlook To-Do / Microsoft Tasks, optionally in a specific list."""
         token = self._get_access_token()
         if not token:
             return f"☑️ **Tarea Outlook To-Do creada (Modo Simulación)**: '{title}'."
@@ -218,15 +218,40 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
+        list_id = "tasks"
+        target_list_title = "Tareas"
+
+        if list_name and list_name.strip():
+            lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+            l_res = requests.get(lists_url, headers=headers, timeout=10)
+            if l_res.status_code == 200:
+                todo_lists = l_res.json().get("value", [])
+                clean_target = list_name.lower().strip()
+                matched = None
+                for l in todo_lists:
+                    if clean_target in l.get("displayName", "").lower():
+                        matched = l
+                        break
+                if matched:
+                    list_id = matched.get("id")
+                    target_list_title = matched.get("displayName")
+                else:
+                    c_res = requests.post(lists_url, headers=headers, json={"displayName": list_name.strip()})
+                    if c_res.status_code in [200, 201]:
+                        matched = c_res.json()
+                        list_id = matched.get("id")
+                        target_list_title = matched.get("displayName")
+
         payload = {
             "title": title,
-            "body": {"content": description, "contentType": "text"}
+            "body": {"content": description, "contentType": "text"} if description else {"content": "", "contentType": "text"}
         }
 
-        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks"
+        url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{list_id}/tasks"
         res = requests.post(url, headers=headers, json=payload)
         if res.status_code in [200, 201]:
-            return f"✅ **Tarea Guardada en Outlook To-Do / Microsoft Tasks**: '{title}'"
+            desc_text = f"\n   📝 *Nota*: {description}" if description else ""
+            return f"✅ **Tarea Guardada en Outlook To-Do**: '{title}' (en lista **\"{target_list_title}\"**){desc_text}"
         else:
             return f"❌ Error creando tarea en Outlook To-Do: {res.text}"
 
@@ -308,6 +333,99 @@ class OutlookIntegration:
             logger.error(f"[Outlook API] Fetch events exception: {e}")
             return f"❌ Error de conexión al consultar Outlook: {e}"
 
+    def get_recurring_calendar_events(self, year: int = 2026) -> str:
+        """Retrieves all recurring/repetitive events from Outlook Calendar for the specified year via Microsoft Graph API."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/events?$top=100&$select=subject,recurrence,type,start,end,webLink"
+        try:
+            res = requests.get(url, headers=headers, timeout=12)
+            if res.status_code != 200:
+                return f"❌ Error al consultar eventos de Outlook ({res.status_code}): {res.text}"
+
+            events = res.json().get("value", [])
+            recurring = [e for e in events if e.get("recurrence") is not None or e.get("type") == "seriesMaster"]
+
+            start_str = f"{year}-01-01T00:00:00Z"
+            end_str = f"{year}-12-31T23:59:59Z"
+            url_view = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={start_str}&endDateTime={end_str}&$top=100&$select=subject,type,start,end"
+            res_view = requests.get(url_view, headers=headers, timeout=12)
+            view_events = res_view.json().get("value", []) if res_view.status_code == 200 else []
+
+            series_titles = set()
+            for ve in view_events:
+                if ve.get("type") in ["occurrence", "exception", "seriesMaster"] or ve.get("seriesMasterId"):
+                    series_titles.add(ve.get("subject", "").strip())
+
+            lines = [
+                f"🗓️ **EVENTOS REPETITIVOS Y RECURRENTES EN TU CALENDARIO ({year})**",
+                "───────────────────────────\n"
+            ]
+
+            if not recurring and not series_titles:
+                return f"🗓️ **EVENTOS REPETITIVOS ({year})**\n\n✨ No se encontraron eventos recurrentes configurados en tu calendario."
+
+            monthly_items = []
+            yearly_items = []
+            other_items = []
+
+            for r in recurring:
+                subject = r.get("subject", "Sin título").strip()
+                rec = r.get("recurrence", {}) or {}
+                pattern = rec.get("pattern", {}) or {}
+                p_type = pattern.get("type", "")
+                day_m = pattern.get("dayOfMonth", "")
+                month_val = pattern.get("month", "")
+
+                if "monthly" in p_type.lower():
+                    day_str = f"Día {day_m} de cada mes" if day_m else "Mensual"
+                    monthly_items.append(f"📌 **{subject}** — `{day_str}`")
+                elif "yearly" in p_type.lower():
+                    yearly_items.append(f"🎂/🎉 **{subject}** — `Anual ({day_m}/{month_val})`" if day_m and month_val else f"🎉 **{subject}** — `Anual`")
+                else:
+                    other_items.append(f"📌 **{subject}**")
+
+            existing_subs = {r.get("subject", "").strip().lower() for r in recurring}
+            for title in sorted(series_titles):
+                if title.lower() not in existing_subs and title:
+                    if "cumple" in title.lower() or "aniversario" in title.lower():
+                        yearly_items.append(f"🎂 **{title}** — `Anual`")
+                    else:
+                        other_items.append(f"📌 **{title}** — `Recurrente`")
+
+            if monthly_items:
+                lines.append("💳 **PAGOS Y COMPROMISOS MENSUALES RECURRENTES:**")
+                for item in monthly_items:
+                    lines.append(f"  {item}")
+                lines.append("")
+
+            if yearly_items:
+                lines.append("🎂 **CUMPLEAÑOS Y ANIVERSARIOS ANUALES:**")
+                for item in yearly_items:
+                    lines.append(f"  {item}")
+                lines.append("")
+
+            if other_items:
+                lines.append("🔄 **OTROS EVENTOS REPETITIVOS:**")
+                for item in other_items:
+                    lines.append(f"  {item}")
+                lines.append("")
+
+            total_count = len(monthly_items) + len(yearly_items) + len(other_items)
+            lines.append("───────────────────────────")
+            lines.append(f"💡 *Total de Eventos Repetitivos en {year}*: `{total_count}`")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"❌ Error al consultar eventos repetitivos en Outlook: {e}"
+
     def _fetch_all_outlook_tasks(self, headers: dict) -> tuple:
         """Fetches pending tasks across ALL Outlook To-Do lists (Tareas, Repetitivos, Casa, etc.)."""
         lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
@@ -376,6 +494,48 @@ class OutlookIntegration:
             return "\n".join(lines)
         except Exception as e:
             return f"❌ Error al consultar listas: {e}"
+
+    def delete_subtasks_from_list(self, list_name: str) -> str:
+        """Deletes all checklist items / subtasks from tasks inside a specific list."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook:\n{err_detail}"
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error consultando listas: {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+        clean_target = list_name.lower().strip()
+        target_list = None
+        for l in todo_lists:
+            if clean_target in l.get("displayName", "").lower():
+                target_list = l
+                break
+
+        if not target_list:
+            return f"⚠️ No encontré la lista \"{list_name}\"."
+
+        lid = target_list.get("id")
+        lname = target_list.get("displayName")
+
+        t_res = requests.get(f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks", headers=headers)
+        tasks = t_res.json().get("value", []) if t_res.status_code == 200 else []
+
+        deleted_count = 0
+        for t in tasks:
+            tid = t.get("id")
+            chk_res = requests.get(f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks/{tid}/checklistItems", headers=headers)
+            chks = chk_res.json().get("value", []) if chk_res.status_code == 200 else []
+            for chk in chks:
+                chkid = chk.get("id")
+                requests.delete(f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks/{tid}/checklistItems/{chkid}", headers=headers)
+                deleted_count += 1
+
+        return f"🗑️ **Subtareas Eliminadas**: Se eliminaron `{deleted_count}` subtareas de la lista **\"{lname}\"**."
+
 
     def _fetch_outlook_tasks(self, headers: dict, top: int = 25) -> tuple:
 

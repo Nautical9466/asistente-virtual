@@ -39,6 +39,20 @@ class VirtualAssistant:
 
     def query(self, user_input: str, user_id: str = "default", model: str = "cerebro-groq", system_prompt: str = None) -> str:
         """Processes a query through LiteLLM across Groq, Gemini, and DeepInfra with fallbacks."""
+        
+        # Pre-check: Execute real Outlook Graph API intent if user input requests an action
+        try:
+            from integrations.outlook import OutlookIntegration
+            from integrations.intent_handler import OutlookIntentParser
+            outlook = OutlookIntegration()
+            parser = OutlookIntentParser(outlook)
+            handled, action_res = parser.parse_and_execute(user_input, "Geral")
+            if handled:
+                self.memory.add_interaction(user_id, user_input, action_res)
+                return action_res
+        except Exception as e:
+            logger.warning(f"[Router] Intent pre-check exception: {e}")
+
         full_system_prompt = self.context_loader.get_full_system_prompt(system_prompt)
 
         # Inject real-time Outlook context for task/list analysis queries
@@ -105,6 +119,16 @@ class VirtualAssistant:
         # 4. Local fallback if all API calls failed
         if not assistant_response:
             assistant_response = self._generate_local_fallback(user_input)
+
+        # Post-check: If LLM claimed consolidation/deletion without API execution, run cleanup
+        if assistant_response:
+            low_resp = assistant_response.lower()
+            if any(p in low_resp for p in ["he consolidado", "he eliminado", "he borrado"]):
+                try:
+                    from integrations.outlook import OutlookIntegration
+                    OutlookIntegration().delete_duplicate_lists()
+                except Exception as e:
+                    logger.warning(f"[Router] Post-cleanup failed: {e}")
 
         self.memory.add_interaction(user_id, user_input, assistant_response)
         return assistant_response

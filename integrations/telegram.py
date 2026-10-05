@@ -22,9 +22,11 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
         from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
         from skills.finance_receipt_manager import FinanceReceiptManager
         from integrations.outlook import OutlookIntegration
+        from integrations.intent_handler import OutlookIntentParser
 
         receipt_manager = FinanceReceiptManager()
         outlook = OutlookIntegration()
+        intent_parser = OutlookIntentParser(outlook)
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
@@ -42,39 +44,12 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             user_id = str(update.message.from_user.id)
             user_first_name = update.message.from_user.first_name or os.environ.get("USER_NAME", "Geral")
             user_text = update.message.text
-            low = user_text.lower().strip()
 
-            # Direct explicit commands for Outlook (with colon or exact action)
-            if low.startswith("agendar evento:") or low.startswith("crear evento:"):
-                event_title = user_text.split(":", 1)[1].strip()
-                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.create_event(event_title, "Mañana 10:00")
-            elif low.startswith("crear tarea:") or low.startswith("agendar tarea:"):
-                task_title = user_text.split(":", 1)[1].strip()
-                response = f"Con mucho gusto, {user_first_name}.\n\n" + outlook.create_task(task_title)
-            elif low.startswith("crear lista:") or low.startswith("nueva lista:"):
-                list_title = user_text.split(":", 1)[1].strip()
-                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.create_todo_list(list_title)
-            elif "duplicadas" in low and ("elimina" in low or "borra" in low or "limpiar" in low):
-                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.delete_duplicate_lists()
-            elif low.startswith("eliminar lista:") or low.startswith("borrar lista:"):
-                list_title = user_text.split(":", 1)[1].strip()
-                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.delete_todo_list(list_title)
-            elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
-                mail_details = user_text.split(":", 1)[1].strip()
-                response = f"Con todo gusto, {user_first_name}.\n\n" + outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
-            elif low.startswith("buscar tarea:") or low.startswith("busca tarea:"):
-                search_q = user_text.split(":", 1)[1].strip()
-                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.search_tasks(search_q)
-            elif "desactivar recurrencia" in low or "quitar recurrencia" in low:
-                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.set_task_recurrence(user_text, enable=False)
-            elif "activar recurrencia" in low or "hacer recurrente" in low:
-                response = f"Con todo gusto, {user_first_name}.\n\n" + outlook.set_task_recurrence(user_text, enable=True)
-            elif low.startswith("cambiar fecha:") or low.startswith("vencer el:"):
-                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.set_task_due_date(user_text, user_text)
-            elif low.startswith("completar tarea:") or low.startswith("marcar completada:"):
-                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.complete_task(user_text)
-            else:
-                # All conversational questions, analyses, and custom prompts are answered intelligently by AI LLM (Groq/Gemini)
+            # 1. Parse natural language intent for Outlook API execution
+            handled, response = intent_parser.parse_and_execute(user_text, user_first_name)
+
+            if not handled:
+                # 2. Conversational fallback answered by AI LLM (Groq/Gemini)
                 response = message_handler_callback(user_text, user_id)
 
 
