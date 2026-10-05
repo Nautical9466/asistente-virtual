@@ -121,7 +121,12 @@ class OutlookIntentParser:
             res = self.outlook.get_recurring_calendar_events(2026)
             return True, f"Con mucho gusto, {user_name}.\n\n{res}"
 
-        # 7. CALENDAR EVENT CREATION
+        # 7. CALENDAR EVENT DELETION
+        if any(w in low for w in ["elimines los cumplea", "eliminar los cumplea", "borrar los cumplea", "elimina los cumplea", "elimina el evento", "eliminar evento", "borra el evento", "borrar evento"]):
+            res = self.outlook.delete_calendar_event(raw)
+            return True, f"Con mucho gusto, {user_name}.\n\n{res}"
+
+        # 8. CALENDAR EVENT CREATION
         if any(w in low for w in ["agendar evento", "crear evento", "nuevo evento", "agenda un evento"]):
             event_title = ""
             if ":" in raw:

@@ -333,6 +333,61 @@ class OutlookIntegration:
             logger.error(f"[Outlook API] Fetch events exception: {e}")
             return f"❌ Error de conexión al consultar Outlook: {e}"
 
+    def delete_calendar_event(self, event_query: str) -> str:
+        """Deletes matching calendar events or recurring series by title/query from Outlook Calendar via Microsoft Graph API."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook:\n{err_detail}"
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+        import re
+        url_events = "https://graph.microsoft.com/v1.0/me/events?$top=250"
+        try:
+            res = requests.get(url_events, headers=headers, timeout=10)
+            events = res.json().get("value", []) if res.status_code == 200 else []
+
+            clean_q = event_query.lower().strip()
+            raw_names = re.split(r'[,y&]\s*', clean_q)
+            target_names = [n.strip() for n in raw_names if len(n.strip()) > 2]
+            if not target_names:
+                target_names = [clean_q]
+
+            deleted_events = []
+            for name in target_names:
+                matched = [e for e in events if name in e.get("subject", "").lower()]
+                if matched:
+                    for me in matched:
+                        eid = me.get("id")
+                        sub = me.get("subject")
+                        del_res = requests.delete(f"https://graph.microsoft.com/v1.0/me/events/{eid}", headers=headers)
+                        if del_res.status_code in [200, 204] and sub not in deleted_events:
+                            deleted_events.append(sub)
+                else:
+                    now_year = datetime.now().year
+                    url_v = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={now_year}-01-01T00:00:00Z&endDateTime={now_year}-12-31T23:59:59Z&$top=250"
+                    res_v = requests.get(url_v, headers=headers, timeout=10)
+                    v_events = res_v.json().get("value", []) if res_v.status_code == 200 else []
+                    cv_matched = [ve for ve in v_events if name in ve.get("subject", "").lower()]
+                    for ve in cv_matched:
+                        sm_id = ve.get("seriesMasterId") or ve.get("id")
+                        sub = ve.get("subject")
+                        del_res = requests.delete(f"https://graph.microsoft.com/v1.0/me/events/{sm_id}", headers=headers)
+                        if del_res.status_code in [200, 204] and sub not in deleted_events:
+                            deleted_events.append(sub)
+
+            if deleted_events:
+                lines = ["🗑️ **EVENTOS DE CALENDARIO ELIMINADOS EN OUTLOOK**", "───────────────────────────\n"]
+                for d in deleted_events:
+                    lines.append(f"❌ Eliminado: **\"{d}\"**")
+                lines.append("\n───────────────────────────")
+                lines.append(f"🎉 Total de eventos eliminados: `{len(deleted_events)}`")
+                return "\n".join(lines)
+            else:
+                return f"⚠️ No se encontraron eventos en tu calendario que coincidan con: \"{event_query}\"."
+        except Exception as e:
+            return f"❌ Error eliminando evento de calendario: {e}"
+
     def get_recurring_calendar_events(self, year: int = 2026) -> str:
         """Retrieves all recurring/repetitive events from Outlook Calendar for the specified year via Microsoft Graph API."""
         token, err_detail = self._get_access_token_detail()
