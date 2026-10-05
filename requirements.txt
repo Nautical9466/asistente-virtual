@@ -1,0 +1,11 @@
+litellm
+flask
+python-telegram-bot
+twilio
+apscheduler
+requests
+python-dotenv
+redis
+gunicorn
+Pillow
+pyyaml
