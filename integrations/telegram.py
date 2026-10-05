@@ -40,47 +40,49 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
                 return
 
             user_id = str(update.message.from_user.id)
+            user_first_name = update.message.from_user.first_name or os.environ.get("USER_NAME", "Geral")
             user_text = update.message.text
             low = user_text.lower().strip()
 
             # Direct explicit commands for Outlook
             if low.startswith("agendar evento:") or low.startswith("crear evento:"):
                 event_title = user_text.split(":", 1)[1].strip()
-                response = outlook.create_event(event_title, "Mañana 10:00")
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.create_event(event_title, "Mañana 10:00")
             elif low.startswith("crear tarea:") or low.startswith("agendar tarea:"):
                 task_title = user_text.split(":", 1)[1].strip()
-                response = outlook.create_task(task_title)
+                response = f"Con mucho gusto, {user_first_name}.\n\n" + outlook.create_task(task_title)
             elif low.startswith("crear lista:") or low.startswith("nueva lista:"):
                 list_title = user_text.split(":", 1)[1].strip()
-                response = outlook.create_todo_list(list_title)
+                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.create_todo_list(list_title)
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
-                response = outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
+                response = f"Con todo gusto, {user_first_name}.\n\n" + outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
             elif any(w in low for w in ["listas", "mis listas", "todas las listas", "lista extra", "crear una lista"]):
-                response = outlook.get_all_lists_grouped()
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.get_all_lists_grouped()
             elif any(w in low for w in ["expirada", "expiradas", "vencida", "vencidas", "vencio", "venció", "vencido", "vencidos", "atrasada", "atrasadas", "atrasado", "atrasados", "oct 1", "1 de octubre", "1 oct", "octubre 1"]):
-                response = outlook.get_overdue_tasks()
+                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.get_overdue_tasks()
             elif low.startswith("buscar tarea:") or low.startswith("busca tarea:"):
                 search_q = user_text.split(":", 1)[1].strip()
-                response = outlook.search_tasks(search_q)
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.search_tasks(search_q)
             elif any(w in low for w in ["seguridad del terreno", "seguridad terreno", "pago de la seguridad", "sugerencia", "sugerencias"]):
-                response = outlook.search_tasks("seguridad")
+                response = f"Con mucho gusto, {user_first_name}.\n\n" + outlook.search_tasks("seguridad")
             elif "desactivar recurrencia" in low or "quitar recurrencia" in low:
-                response = outlook.set_task_recurrence(user_text, enable=False)
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.set_task_recurrence(user_text, enable=False)
             elif "activar recurrencia" in low or "hacer recurrente" in low:
-                response = outlook.set_task_recurrence(user_text, enable=True)
+                response = f"Con todo gusto, {user_first_name}.\n\n" + outlook.set_task_recurrence(user_text, enable=True)
             elif any(w in low for w in ["cambiar fecha", "poner fecha", "vencer el", "vencer en", "fecha limite"]):
-                response = outlook.set_task_due_date(user_text, user_text)
+                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.set_task_due_date(user_text, user_text)
             elif any(w in low for w in ["completar", "completada", "completadas", "marcar como completada", "marca como completada", "marcar completada", "marcar tarea", "completar tarea"]):
-                response = outlook.complete_task(user_text)
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.complete_task(user_text)
             elif any(w in low for w in ["tarea", "tareas", "todo", "todos", "pendiente", "pendientes"]):
-                response = outlook.get_tasks()
+                response = f"Con mucho gusto, {user_first_name}.\n\n" + outlook.get_tasks()
             elif any(w in low for w in ["evento", "eventos", "calendario", "agenda", "agendado", "programado"]) and any(w in low for w in ["tengo", "ver", "revisar", "mostrar", "cuál", "cual", "cuáles", "cuales", "próxima", "proxima", "semana", "mes", "hay", "que tengo", "mis"]):
                 days = 30 if "mes" in low else 14
-                response = outlook.get_calendar_events(days_ahead=days)
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.get_calendar_events(days_ahead=days)
             else:
                 # All conversational questions & queries are answered intelligently by AI (Groq/Gemini/Qwen)
                 response = message_handler_callback(user_text, user_id)
+
 
             try:
                 await update.message.reply_text(response, parse_mode="Markdown")
