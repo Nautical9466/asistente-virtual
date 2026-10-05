@@ -51,8 +51,8 @@ class OutlookIntegration:
         token, _ = self._get_access_token_detail()
         return token
 
-    def create_event(self, title: str, date_str: str, duration_minutes: int = 30) -> str:
-        """Creates an Event in Outlook Calendar."""
+    def create_event(self, title: str, date_str: str, duration_minutes: int = 60) -> str:
+        """Creates an Event in Outlook Calendar with reminder and proper date parsing."""
         token = self._get_access_token()
         if not token:
             return f"📅 **Evento Outlook agendado (Modo Simulación)**: '{title}' para {date_str} ({duration_minutes} min)."
@@ -62,13 +62,40 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
-        start_dt = datetime.now() + timedelta(days=1)
+        import re
+        try:
+            d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
+            if d_match:
+                start_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)), 9, 0, 0)
+            else:
+                d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
+                if d_match2:
+                    start_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)), 9, 0, 0)
+                elif "mañana" in date_str.lower():
+                    start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+                elif "sábado" in date_str.lower() or "sabado" in date_str.lower():
+                    now = datetime.now()
+                    days_ahead = (5 - now.weekday()) % 7
+                    if days_ahead == 0: days_ahead = 7
+                    start_dt = (now + timedelta(days=days_ahead)).replace(hour=9, minute=0, second=0)
+                elif "domingo" in date_str.lower():
+                    now = datetime.now()
+                    days_ahead = (6 - now.weekday()) % 7
+                    if days_ahead == 0: days_ahead = 7
+                    start_dt = (now + timedelta(days=days_ahead)).replace(hour=9, minute=0, second=0)
+                else:
+                    start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+        except Exception:
+            start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 
         payload = {
             "subject": title,
-            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Central America Standard Time"},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Central America Standard Time"}
+            "start": {"dateTime": start_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
+            "end": {"dateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
+            "isReminderOn": True,
+            "reminderMinutesBeforeStart": 1440
         }
 
         url = "https://graph.microsoft.com/v1.0/me/events"
@@ -76,9 +103,11 @@ class OutlookIntegration:
         if res.status_code in [200, 201]:
             event_data = res.json()
             link = event_data.get("webLink", "#")
-            return f"✅ **Evento Creado en Outlook Calendar**: [{title}]({link})"
+            fmt_date = start_dt.strftime("%d/%m/%Y a las %H:%M hs")
+            return f"✅ **Evento Creado en Outlook Calendar**: [{title}]({link})\n⏰ *Fecha*: `{fmt_date}` (Recordatorio 1 día antes activo)"
         else:
-            return f"❌ Error creando evento en Outlook: {res.text}"
+            return f"❌ Error creando evento en Outlook ({res.status_code}): {res.text}"
+
 
     def create_task(self, title: str, description: str = "") -> str:
         """Creates a Task in Outlook To-Do / Microsoft Tasks."""
@@ -324,6 +353,80 @@ class OutlookIntegration:
                 return f"❌ Error creando lista en Outlook ({res.status_code}): {res.text}"
         except Exception as e:
             return f"❌ Error de conexión al crear lista: {e}"
+
+    def delete_todo_list(self, list_name_or_id: str) -> str:
+        """Deletes a task list in Outlook To-Do / Microsoft Tasks."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas: {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+        clean_name = list_name_or_id.lower().strip()
+        target_list = None
+        for l in todo_lists:
+            if l.get("id") == list_name_or_id or clean_name in l.get("displayName", "").lower():
+                target_list = l
+                break
+
+        if not target_list:
+            return f"⚠️ No encontré la lista \"{list_name_or_id}\" para eliminar."
+
+        lid = target_list.get("id")
+        lname = target_list.get("displayName")
+        del_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}"
+        del_res = requests.delete(del_url, headers=headers)
+        if del_res.status_code in [200, 204]:
+            return f"🗑️ **Lista Eliminada**: **\"{lname}\"**"
+        else:
+            return f"❌ Error eliminando lista ({del_res.status_code}): {del_res.text}"
+
+    def delete_duplicate_lists(self) -> str:
+        """Finds and deletes duplicate lists ending with (1), (2), etc."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas: {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+        deleted = []
+        import re
+        for l in todo_lists:
+            lname = l.get("displayName", "")
+            if re.search(r'\(\d+\)$', lname.strip()):
+                lid = l.get("id")
+                del_res = requests.delete(f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}", headers=headers)
+                if del_res.status_code in [200, 204]:
+                    deleted.append(lname)
+
+        if not deleted:
+            return "🎉 No se encontraron listas duplicadas con '(1)' para eliminar."
+
+        lines = ["🗑️ **LISTAS DUPLICADAS ELIMINADAS EN OUTLOOK TO-DO**", "───────────────────────────\n"]
+        for d in deleted:
+            lines.append(f"❌ Eliminada: **\"{d}\"**")
+        lines.append("\n───────────────────────────")
+        lines.append("🎉 ¡Tus listas están limpias y sin duplicados!")
+        return "\n".join(lines)
+
 
     def move_task(self, task_input: str, destination_list_name: str) -> str:
         """Moves a task from its current list to a destination list by list name."""

@@ -54,6 +54,11 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             elif low.startswith("crear lista:") or low.startswith("nueva lista:"):
                 list_title = user_text.split(":", 1)[1].strip()
                 response = f"Por supuesto, {user_first_name}.\n\n" + outlook.create_todo_list(list_title)
+            elif "duplicadas" in low and ("elimina" in low or "borra" in low or "limpiar" in low):
+                response = f"Por supuesto, {user_first_name}.\n\n" + outlook.delete_duplicate_lists()
+            elif low.startswith("eliminar lista:") or low.startswith("borrar lista:"):
+                list_title = user_text.split(":", 1)[1].strip()
+                response = f"Claro que sí, {user_first_name}.\n\n" + outlook.delete_todo_list(list_title)
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
                 response = f"Con todo gusto, {user_first_name}.\n\n" + outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
