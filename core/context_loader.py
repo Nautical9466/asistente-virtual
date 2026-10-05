@@ -43,7 +43,13 @@ class ContextLoader:
             "- 💼 Búsqueda de empleo en LinkedIn, optimización de perfil y CV.\n"
             "- 🔗 Hub de integraciones (Alarmas, Gantt ClickUp, Telegram, Slack, Outlook, Obsidian).\n"
             "- 🧠 Investigación profunda y síntesis de sabiduría estilo Claudia OS.\n\n"
-            "Mantén un tono profesional, motivador y directo."
+            "🚫 PROHIBICIÓN STRICTA DE TABLAS (| col | col |):\n"
+            "NUNCA generes tablas con barras/pipes en Markdown (|). En Telegram se destruye el formato y quedan ilegibles en pantallas móviles.\n\n"
+            "🎨 REGLAS OBLIGATORIAS DE FORMATO TELEGRAM:\n"
+            "1. Presenta las listas, opciones o reportes en TARJETAS VISUALES utilizando viñetas (📌, ⏳, ⏰, 🎯, 💡, ⚡).\n"
+            "2. Usa negritas para títulos principales y bloques monosensibles (ej: `10/10/2026`) para fechas o valores clave.\n"
+            "3. Separa cada sección con líneas divisorias elegantes (`───────────────────────────`).\n"
+            "4. Deja espacios entre tarjetas para que la lectura sea limpia, aireada y atractiva visualmente."
         )
 
         prompt_parts = [base_prompt or default_base]

@@ -150,23 +150,29 @@ class OutlookIntegration:
             if res.status_code == 200:
                 events = res.json().get("value", [])
                 if not events:
-                    return f"📅 **Agenda Outlook**: No tienes eventos agendados para los próximos {days_ahead} días."
+                    return f"🗓️ **AGENDA OUTLOOK (Próximos {days_ahead} días)**\n\n✨ No tienes eventos agendados."
 
-                lines = [f"📅 **Tus próximos eventos en Outlook (próximos {days_ahead} días)**:\n"]
+                lines = [
+                    f"🗓️ **AGENDA DE EVENTOS (Próximos {days_ahead} días)**",
+                    "───────────────────────────\n"
+                ]
                 for e in events:
                     subject = e.get("subject", "Sin título")
                     start_data = e.get("start", {})
                     dt_str = start_data.get("dateTime", "")
                     try:
                         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-                        date_fmt = dt.strftime("%d/%m/%Y a las %H:%M")
+                        date_fmt = dt.strftime("%d/%m/%Y • %H:%M hs")
                     except Exception:
                         date_fmt = dt_str[:16]
                     link = e.get("webLink", "")
                     if link:
-                        lines.append(f"• **[{subject}]({link})** — `{date_fmt}`")
+                        lines.append(f"📌 **[{subject}]({link})**\n   ⏰ `{date_fmt}`\n")
                     else:
-                        lines.append(f"• **{subject}** — `{date_fmt}`")
+                        lines.append(f"📌 **{subject}**\n   ⏰ `{date_fmt}`\n")
+
+                lines.append("───────────────────────────")
+                lines.append(f"💡 *Total de eventos*: `{len(events)}`")
                 return "\n".join(lines)
             else:
                 logger.error(f"[Outlook API] Fetch events error: {res.text}")
@@ -174,3 +180,52 @@ class OutlookIntegration:
         except Exception as e:
             logger.error(f"[Outlook API] Fetch events exception: {e}")
             return f"❌ Error de conexión al consultar Outlook: {e}"
+
+    def get_tasks(self) -> str:
+        """Retrieves pending Outlook To-Do tasks from Microsoft Graph API."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"📋 **Tareas Outlook To-Do (Modo Simulación)**:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top=25"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                tasks = res.json().get("value", [])
+                if not tasks:
+                    return "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**:\n\n🎉 ¡Excelente! No tienes tareas pendientes registradas."
+
+                lines = [
+                    "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**",
+                    "───────────────────────────\n"
+                ]
+                for idx, t in enumerate(tasks, start=1):
+                    title = t.get("title", "Sin título")
+                    status = t.get("status", "notStarted")
+                    status_emoji = "⏳" if status == "inProgress" else "📌"
+                    due = t.get("dueDateTime", {}).get("dateTime", None)
+                    if due:
+                        try:
+                            dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
+                            due_fmt = f" (Vence: `{dt.strftime('%d/%m/%Y')}`)"
+                        except Exception:
+                            due_fmt = f" (Vence: `{due[:10]}`)"
+                    else:
+                        due_fmt = ""
+
+                    lines.append(f"{status_emoji} **{idx}. {title}**{due_fmt}\n")
+
+                lines.append("───────────────────────────")
+                lines.append(f"💡 *Total de pendientes*: `{len(tasks)} tareas`")
+                return "\n".join(lines)
+            else:
+                logger.error(f"[Outlook API] Fetch tasks error: {res.text}")
+                return f"❌ Error al consultar tareas de Outlook ({res.status_code}): {res.text}"
+        except Exception as e:
+            logger.error(f"[Outlook API] Fetch tasks exception: {e}")
+            return f"❌ Error de conexión al consultar tareas: {e}"
