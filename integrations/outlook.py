@@ -229,3 +229,71 @@ class OutlookIntegration:
         except Exception as e:
             logger.error(f"[Outlook API] Fetch tasks exception: {e}")
             return f"❌ Error de conexión al consultar tareas: {e}"
+
+    def complete_task(self, task_input: str) -> str:
+        """Marks one or more tasks as completed in Outlook To-Do via Microsoft Graph API."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top=50"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code != 200:
+                return f"❌ Error al consultar las tareas de Outlook ({res.status_code}): {res.text}"
+
+            tasks = res.json().get("value", [])
+            if not tasks:
+                return "ℹ️ No hay tareas pendientes para completar."
+
+            import re
+            numbers = [int(n) for n in re.findall(r'\b\d+\b', task_input)]
+
+            targets = []
+            if numbers:
+                for num in numbers:
+                    if 1 <= num <= len(tasks):
+                        targets.append(tasks[num - 1])
+            else:
+                clean_input = task_input.lower().strip()
+                for t in tasks:
+                    if clean_input in t.get("title", "").lower():
+                        targets.append(t)
+
+            if not targets:
+                return f"⚠️ No encontré ninguna tarea pendiente que coincida con `{task_input}`."
+
+            completed_titles = []
+            failed_titles = []
+
+            for t in targets:
+                tid = t.get("id")
+                title = t.get("title", "Sin título")
+                patch_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks/{tid}"
+                patch_res = requests.patch(patch_url, headers=headers, json={"status": "completed"})
+                if patch_res.status_code in [200, 204]:
+                    completed_titles.append(title)
+                else:
+                    failed_titles.append(title)
+
+            lines = ["✅ **TAREAS MARCADAS COMO COMPLETADAS EN OUTLOOK**", "───────────────────────────\n"]
+            for title in completed_titles:
+                lines.append(f"✔️ **{title}**\n")
+
+            if failed_titles:
+                lines.append("\n❌ **No se pudieron completar:**")
+                for title in failed_titles:
+                    lines.append(f"• {title}\n")
+
+            lines.append("───────────────────────────")
+            lines.append("🎉 ¡Sincronizado con tu cuenta de Microsoft Outlook!")
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.error(f"[Outlook API] Complete task exception: {e}")
+            return f"❌ Error al marcar tarea como completada: {e}"
