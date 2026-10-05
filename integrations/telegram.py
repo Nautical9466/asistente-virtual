@@ -28,6 +28,20 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
         outlook = OutlookIntegration()
         intent_parser = OutlookIntentParser(outlook)
 
+        async def send_delayed_telegram_reminder(bot, chat_id: int, user_name: str, reason: str, delay_sec: int):
+            await asyncio.sleep(delay_sec)
+            msg = (
+                f"⏰ **¡RECORDATORIO PARA {user_name.upper()}!**\n"
+                f"───────────────────────────\n"
+                f"📌 **Recordatorio**: {reason}\n\n"
+                f"¡Es la hora programada! Cuídate mucho. 😊"
+            )
+            try:
+                await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"[Telegram] Delayed reminder send failed: {e}")
+                await bot.send_message(chat_id=chat_id, text=f"⏰ ¡RECORDATORIO! Es hora de: {reason}")
+
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "👋 **¡Hola! Soy tu Asistente Virtual 24/7.**\n\n"
@@ -45,10 +59,17 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             user_first_name = update.message.from_user.first_name or os.environ.get("USER_NAME", "Geral")
             user_text = update.message.text
 
-            # 1. Parse natural language intent for Outlook API execution
-            handled, response = intent_parser.parse_and_execute(user_text, user_first_name)
+            # 1. Parse natural language intent for Outlook or direct Telegram message reminders
+            handled, response_data = intent_parser.parse_and_execute(user_text, user_first_name)
 
-            if not handled:
+            if handled and isinstance(response_data, tuple):
+                response, delay_sec, reason = response_data
+                asyncio.create_task(
+                    send_delayed_telegram_reminder(context.bot, update.effective_chat.id, user_first_name, reason, delay_sec)
+                )
+            elif handled:
+                response = response_data
+            else:
                 # 2. Conversational fallback answered by AI LLM (Groq/Gemini)
                 response = message_handler_callback(user_text, user_id)
 

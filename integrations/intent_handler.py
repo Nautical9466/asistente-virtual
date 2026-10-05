@@ -1,27 +1,89 @@
 import re
 import json
 import logging
-from typing import Tuple, Optional
+from datetime import datetime, timedelta
+from typing import Tuple, Optional, Any
 from integrations.outlook import OutlookIntegration
 
 logger = logging.getLogger(__name__)
 
+def parse_reminder_time(text: str) -> Tuple[Optional[datetime], str]:
+    """Extracts target datetime and reason for a Telegram message reminder."""
+    now = datetime.now()
+    
+    # 1. "en X minutos" / "en X horas"
+    m_rel = re.search(r'en\s+(\d+)\s+(minuto|minutos|min|hora|horas|h)\b', text, re.IGNORECASE)
+    if m_rel:
+        num = int(m_rel.group(1))
+        unit = m_rel.group(2).lower()
+        if 'h' in unit:
+            target_dt = now + timedelta(hours=num)
+        else:
+            target_dt = now + timedelta(minutes=num)
+        
+        reason = re.sub(r'en\s+\d+\s+(minuto|minutos|min|hora|horas|h)', '', text, flags=re.IGNORECASE).strip()
+        reason = re.sub(r'(quiero que|me mandes|un mensaje|recordandome|recordarme|eso|por aca|por aquí|por aqui)', '', reason, flags=re.IGNORECASE).strip()
+        reason = re.sub(r'^[\s,:\'\"]+|[\s,:\'\"]+$', '', reason).strip()
+        return target_dt, reason.capitalize() if reason else "Recordatorio"
+
+    # 2. "a las HH:MM PM/AM" or "a las HH:MM"
+    m_abs = re.search(r'a\s+las\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', text, re.IGNORECASE)
+    if m_abs:
+        hour = int(m_abs.group(1))
+        minute = int(m_abs.group(2)) if m_abs.group(2) else 0
+        ampm = m_abs.group(3).lower() if m_abs.group(3) else None
+        
+        if ampm == "pm" and hour < 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+            
+        target_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target_dt < now:
+            target_dt += timedelta(days=1)
+            
+        reason = re.sub(r'a\s+las\s+\d{1,2}(?::\d{2})?\s*(am|pm)?', '', text, flags=re.IGNORECASE).strip()
+        reason = re.sub(r'(me tengo que|tengo que|quiero que|me mandes|un mensaje|recordandome|recordarme|eso|por aca|por aquí|por aqui|hoy)', '', reason, flags=re.IGNORECASE).strip()
+        reason = re.sub(r'^[\s,:\'\"]+|[\s,:\'\"]+$', '', reason).strip()
+        return target_dt, reason.capitalize() if reason else "Recordatorio"
+
+    return None, ""
+
 class OutlookIntentParser:
-    """Smart Natural Language Intent Parser and Executor for Outlook To-Do, Calendar, and Mail."""
+    """Smart Natural Language Intent Parser and Executor for Outlook To-Do, Calendar, Mail, and Direct Telegram Reminders."""
 
     def __init__(self, outlook: OutlookIntegration):
         self.outlook = outlook
 
-    def parse_and_execute(self, user_text: str, user_name: str = "Geral") -> Tuple[bool, str]:
+    def parse_and_execute(self, user_text: str, user_name: str = "Geral") -> Tuple[bool, Any]:
         """
-        Parses natural language requests and executes real Outlook Graph API operations.
-        Returns (handled: bool, response_text: str).
+        Parses natural language requests and executes real operations.
+        Returns (handled: bool, response_data: str or tuple).
         """
         raw = user_text.strip()
         low = raw.lower()
 
+        # 0. DIRECT TELEGRAM CHAT MESSAGE REMINDER (NO OUTLOOK, NO TO-DO)
+        # Examples: "me tengo que tomar una pastilla hoy a las 3:47 PM quiero que me mandes un mensaje recordandome eso por aca"
+        if any(w in low for w in ["mensaje", "por aca", "por aquí", "por aqui", "por chat", "por este chat"]) and any(w in low for w in ["recordando", "recuérdame", "recuerdame", "recordar", "pastilla", "alarma", "avísame", "avisame"]):
+            target_dt, reason = parse_reminder_time(raw)
+            if target_dt:
+                now = datetime.now()
+                delay_sec = max(1, int((target_dt - now).total_seconds()))
+                time_fmt = target_dt.strftime("%H:%M")
+                
+                res_msg = (
+                    f"Con mucho gusto, {user_name}.\n\n"
+                    f"⏰ **Recordatorio por Mensaje Programado**\n"
+                    f"───────────────────────────\n"
+                    f"📌 **Motivo**: {reason}\n"
+                    f"⏰ **Hora programada**: `{time_fmt} hs`\n"
+                    f"💬 **Canal**: Mensaje directo por este chat de Telegram.\n\n"
+                    f"*(Nota: No se creó ningún evento en Outlook ni tarea en To-Do, se enviará únicamente como un mensaje directo por este chat)*"
+                )
+                return True, (res_msg, delay_sec, reason)
+
         # 1. LIST CREATION
-        # Examples: "quiero que crees una lista que se llame 'Tareas por la noche'", "crear lista: Casa", "nueva lista Compras"
         if ("lista" in low and any(w in low for w in ["crees", "crear", "crea", "nueva", "hacer"])) and not ("tarea" in low and any(w in low for w in ["añade", "agrega", "a;ade", "pon"])):
             list_title = ""
             if ":" in raw and any(low.startswith(p) for p in ["crear lista:", "nueva lista:", "crea lista:"]):
@@ -31,21 +93,18 @@ class OutlookIntentParser:
                 if m:
                     list_title = m.group(1).strip()
 
-            # Clean trailing quotes/escapes
             list_title = re.sub(r'[\'\"\\]+$', '', list_title).strip()
             if list_title:
                 res = self.outlook.create_todo_list(list_title)
                 return True, f"Con mucho gusto, {user_name}.\n\n{res}"
 
         # 2. TASK CREATION WITH OPTIONAL TARGET LIST AND NOTE
-        # Examples: "a;ade una tarea llamada 'Comprar el telefono de Rouse' a Tareas por la noche list ponle como nota 'Ir al maxipali'", "crear tarea: Comprar pan"
         task_kw = any(w in low for w in ["añade una tarea", "a;ade una tarea", "añadir tarea", "a;adir tarea", "agrega una tarea", "agreges una tarea", "crea una tarea", "pon una tarea", "crear tarea:", "agendar tarea:"])
         if task_kw:
             title = ""
             list_name = None
             note = ""
 
-            # Check quotes first
             q_matches = re.findall(r'[\'\"]([^\'\"]+)[\'\"]', raw)
             if q_matches:
                 title = q_matches[0]
@@ -61,7 +120,6 @@ class OutlookIntentParser:
                         title = tm.group(1).strip()
                         title = re.split(r'\s+a\s+|\s+en\s+la\s+lista|\s+list\b', title, flags=re.IGNORECASE)[0].strip()
 
-            # Extract list name
             lm = re.search(r'(?:a|en)\s+(?:la\s+lista\s+)?[\'\"]?([^\'\"]+?)[\'\"]?\s*(?:list|lista)\b', raw, re.IGNORECASE)
             if lm:
                 cand = lm.group(1).strip()
@@ -74,7 +132,6 @@ class OutlookIntentParser:
                     if cand2.lower() not in ["que", "una", "la", "tarea", "mi"]:
                         list_name = cand2
 
-            # Extract note if not extracted from quotes
             if not note:
                 nm = re.search(r'(?:nota|descripción|descripcion)\s*(?:que|:)?\s*[\'\"]?([^\'\"]+)[\'\"]?', raw, re.IGNORECASE)
                 if nm:
