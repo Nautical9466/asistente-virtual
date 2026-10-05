@@ -325,6 +325,111 @@ class OutlookIntegration:
         except Exception as e:
             return f"❌ Error de conexión al crear lista: {e}"
 
+    def move_task(self, task_input: str, destination_list_name: str) -> str:
+        """Moves a task from its current list to a destination list by list name."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas ({l_res.status_code}): {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+        clean_dest = destination_list_name.lower().strip()
+        dest_list = None
+
+        for l in todo_lists:
+            if clean_dest in l.get("displayName", "").lower():
+                dest_list = l
+                break
+
+        if not dest_list:
+            c_res = requests.post(lists_url, headers=headers, json={"displayName": destination_list_name.strip()})
+            if c_res.status_code in [200, 201]:
+                dest_list = c_res.json()
+            else:
+                return f"⚠️ No encontré ni pude crear la lista destino \"{destination_list_name}\"."
+
+        dest_id = dest_list.get("id")
+        dest_name = dest_list.get("displayName")
+
+        status_code, tasks, err_msg = self._fetch_all_outlook_tasks(headers)
+        if status_code != 200:
+            return f"❌ Error al consultar tareas ({status_code}): {err_msg}"
+
+        clean_input = task_input.lower().strip()
+        target_task = None
+        for t in tasks:
+            if clean_input in t.get("title", "").lower():
+                target_task = t
+                break
+
+        if not target_task:
+            return f"⚠️ No encontré ninguna tarea pendiente que coincida con \"{task_input}\"."
+
+        src_id = target_task.get("_list_id")
+        tid = target_task.get("id")
+        title = target_task.get("title", "Sin título")
+
+        payload = {
+            "title": title,
+            "body": target_task.get("body", {}),
+            "dueDateTime": target_task.get("dueDateTime"),
+            "recurrence": target_task.get("recurrence")
+        }
+        create_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{dest_id}/tasks"
+        res = requests.post(create_url, headers=headers, json=payload)
+        if res.status_code in [200, 201]:
+            del_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{src_id}/tasks/{tid}"
+            requests.delete(del_url, headers=headers)
+            return f"✅ **Tarea Movida**: *\"{title}\"* ➔ **{dest_name}**"
+        else:
+            return f"❌ Error moviendo tarea a {dest_name} ({res.status_code}): {res.text}"
+
+
+    def rename_list(self, old_name: str, new_name: str) -> str:
+        """Renames an existing Outlook To-Do list."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas: {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+        clean_old = old_name.lower().strip()
+        target_list = None
+        for l in todo_lists:
+            if clean_old in l.get("displayName", "").lower():
+                target_list = l
+                break
+
+        if not target_list:
+            return f"⚠️ No encontré la lista \"{old_name}\" para renombrar."
+
+        lid = target_list.get("id")
+        patch_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}"
+        patch_res = requests.patch(patch_url, headers=headers, json={"displayName": new_name.strip()})
+        if patch_res.status_code in [200, 204]:
+            return f"✏️ **Lista Renombrada**: *\"{target_list.get('displayName')}\"* ➔ **\"{new_name.strip()}\"**"
+        else:
+            return f"❌ Error al renombrar lista ({patch_res.status_code}): {patch_res.text}"
+
+
     def get_all_lists_grouped(self) -> str:
         """Retrieves all Outlook To-Do lists and groups tasks by list."""
         token, err_detail = self._get_access_token_detail()

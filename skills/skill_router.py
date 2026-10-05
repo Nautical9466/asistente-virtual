@@ -61,10 +61,15 @@ class SkillRouter:
 
     def route_message(self, user_input: str):
         low = user_input.lower()
+        # Bypass skill router if user is managing Outlook tasks, lists, or calendar events
+        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "outlook", "calendario", "evento"]):
+            return None
+
         for kw, skill in self.keyword_map.items():
             if kw in low:
                 return skill
         return None
+
 
     def execute(self, user_input: str, user_id: str = "default"):
         skill = self.route_message(user_input)
