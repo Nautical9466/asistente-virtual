@@ -20,11 +20,13 @@ class VirtualAssistant:
             import litellm
             from litellm import Router
 
-            # Check if any LLM API key is set
             has_keys = any(os.environ.get(k) for k in ["GROQ_API_KEY", "GEMINI_API_KEY", "DEEPINFRA_API_KEY"])
 
             if os.path.exists(self.config_path) and has_keys:
-                self.router = Router.from_yaml(self.config_path)
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+                model_list = config.get("model_list", [])
+                self.router = Router(model_list=model_list)
                 print("[VirtualAssistant] LiteLLM Router initialized successfully.")
             else:
                 print("[VirtualAssistant] No LLM API keys found or config missing. Local fallback mode enabled.")
@@ -54,7 +56,6 @@ class VirtualAssistant:
                 assistant_response = response.choices[0].message.content
             except Exception as e:
                 print(f"[VirtualAssistant] Error querying {model}: {e}. Retrying fallback...")
-                # Attempt direct LiteLLM completion fallback if router failed
                 try:
                     import litellm
                     if os.environ.get("GEMINI_API_KEY"):
@@ -67,10 +68,8 @@ class VirtualAssistant:
                     print(f"[VirtualAssistant] Fallback completion error: {ex}")
 
         if not assistant_response:
-            # Smart local response generator when API keys are not yet configured
             assistant_response = self._generate_local_fallback(user_input)
 
-        # Store interaction in memory
         self.memory.add_interaction(user_id, user_input, assistant_response)
         return assistant_response
 
