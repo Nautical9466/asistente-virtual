@@ -51,8 +51,58 @@ class OutlookIntegration:
         token, _ = self._get_access_token_detail()
         return token
 
-    def create_event(self, title: str, date_str: str, duration_minutes: int = 60) -> str:
-        """Creates an Event in Outlook Calendar with reminder and proper date parsing."""
+    def find_best_time_slot(self, target_date: datetime, duration_minutes: int = 60) -> datetime:
+        """Scans Outlook Calendar on target_date and finds the first open time slot between 8:00 AM and 5:00 PM."""
+        token = self._get_access_token()
+        if not token:
+            return target_date.replace(hour=9, minute=0, second=0)
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        start_day_str = target_date.strftime("%Y-%m-%dT00:00:00Z")
+        end_day_str = target_date.strftime("%Y-%m-%dT23:59:59Z")
+
+        url = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={start_day_str}&endDateTime={end_day_str}&$orderby=start/dateTime"
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            events = res.json().get("value", []) if res.status_code == 200 else []
+
+            for hour in range(8, 18):
+                candidate_start = target_date.replace(hour=hour, minute=0, second=0)
+                candidate_end = candidate_start + timedelta(minutes=duration_minutes)
+
+                is_busy = False
+                for e in events:
+                    e_start_str = e.get("start", {}).get("dateTime", "")
+                    e_end_str = e.get("end", {}).get("dateTime", "")
+                    try:
+                        e_start = datetime.fromisoformat(e_start_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                        e_end = datetime.fromisoformat(e_end_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                        if not (candidate_end <= e_start or candidate_start >= e_end):
+                            is_busy = True
+                            break
+                    except Exception:
+                        pass
+
+                if not is_busy:
+                    return candidate_start
+
+            return target_date.replace(hour=9, minute=0, second=0)
+        except Exception:
+            return target_date.replace(hour=9, minute=0, second=0)
+
+    def create_event(
+        self,
+        title: str,
+        date_str: str,
+        duration_minutes: int = 60,
+        reminder_minutes: int = 1440,
+        is_teams_meeting: bool = False,
+        attendees: list = None,
+        categories: list = None,
+        description: str = "",
+        auto_find_best_time: bool = False
+    ) -> str:
+        """Creates an Event in Outlook Calendar with full customization (Teams, attendees, categories, reminders, smart scheduling)."""
         token = self._get_access_token()
         if not token:
             return f"📅 **Evento Outlook agendado (Modo Simulación)**: '{title}' para {date_str} ({duration_minutes} min)."
@@ -63,30 +113,42 @@ class OutlookIntegration:
         }
 
         import re
+        target_time = None
         try:
+            t_match = re.search(r'(\d{1,2}):(\d{2})', date_str)
+            if t_match:
+                target_time = (int(t_match.group(1)), int(t_match.group(2)))
+
             d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
             if d_match:
-                start_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)), 9, 0, 0)
+                base_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)))
             else:
                 d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
                 if d_match2:
-                    start_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)), 9, 0, 0)
+                    base_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)))
                 elif "mañana" in date_str.lower():
-                    start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+                    base_dt = datetime.now() + timedelta(days=1)
                 elif "sábado" in date_str.lower() or "sabado" in date_str.lower():
                     now = datetime.now()
                     days_ahead = (5 - now.weekday()) % 7
                     if days_ahead == 0: days_ahead = 7
-                    start_dt = (now + timedelta(days=days_ahead)).replace(hour=9, minute=0, second=0)
+                    base_dt = now + timedelta(days=days_ahead)
                 elif "domingo" in date_str.lower():
                     now = datetime.now()
                     days_ahead = (6 - now.weekday()) % 7
                     if days_ahead == 0: days_ahead = 7
-                    start_dt = (now + timedelta(days=days_ahead)).replace(hour=9, minute=0, second=0)
+                    base_dt = now + timedelta(days=days_ahead)
                 else:
-                    start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+                    base_dt = datetime.now() + timedelta(days=1)
         except Exception:
-            start_dt = datetime.now().replace(hour=9, minute=0, second=0) + timedelta(days=1)
+            base_dt = datetime.now() + timedelta(days=1)
+
+        if auto_find_best_time:
+            start_dt = self.find_best_time_slot(base_dt, duration_minutes)
+        elif target_time:
+            start_dt = base_dt.replace(hour=target_time[0], minute=target_time[1], second=0)
+        else:
+            start_dt = base_dt.replace(hour=9, minute=0, second=0)
 
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 
@@ -95,8 +157,24 @@ class OutlookIntegration:
             "start": {"dateTime": start_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
             "end": {"dateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
             "isReminderOn": True,
-            "reminderMinutesBeforeStart": 1440
+            "reminderMinutesBeforeStart": reminder_minutes
         }
+
+        if description:
+            payload["body"] = {"contentType": "Text", "content": description}
+
+        if is_teams_meeting:
+            payload["isOnlineMeeting"] = True
+            payload["onlineMeetingProvider"] = "teamsForBusiness"
+
+        if categories:
+            payload["categories"] = categories
+
+        if attendees:
+            payload["attendees"] = [
+                {"emailAddress": {"address": a.strip()}, "type": "required"}
+                for a in attendees if a.strip()
+            ]
 
         url = "https://graph.microsoft.com/v1.0/me/events"
         res = requests.post(url, headers=headers, json=payload)
@@ -104,9 +182,29 @@ class OutlookIntegration:
             event_data = res.json()
             link = event_data.get("webLink", "#")
             fmt_date = start_dt.strftime("%d/%m/%Y a las %H:%M hs")
-            return f"✅ **Evento Creado en Outlook Calendar**: [{title}]({link})\n⏰ *Fecha*: `{fmt_date}` (Recordatorio 1 día antes activo)"
+
+            if reminder_minutes >= 1440:
+                rem_text = f"{reminder_minutes // 1440} día(s) antes"
+            elif reminder_minutes >= 60:
+                rem_text = f"{reminder_minutes // 60} hora(s) antes"
+            else:
+                rem_text = f"{reminder_minutes} min antes"
+
+            details_list = [f"✅ **Evento Creado en Outlook Calendar**: [{title}]({link})"]
+            details_list.append(f"⏰ *Fecha del Evento*: `{fmt_date}`")
+            details_list.append(f"🔔 *Notificación de Recordatorio*: `{rem_text}`")
+
+            if is_teams_meeting:
+                details_list.append("💻 *Reunión de Microsoft Teams*: `Activada`")
+            if categories:
+                details_list.append(f"🏷️ *Etiquetas/Categorías*: `{', '.join(categories)}`")
+            if attendees:
+                details_list.append(f"👥 *Invitaciones enviadas*: `{', '.join(attendees)}`")
+
+            return "\n".join(details_list)
         else:
             return f"❌ Error creando evento en Outlook ({res.status_code}): {res.text}"
+
 
 
     def create_task(self, title: str, description: str = "") -> str:
