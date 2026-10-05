@@ -206,6 +206,8 @@ class OutlookIntegration:
                 ]
 
                 import re
+                now = datetime.now()
+
                 for idx, t in enumerate(tasks, start=1):
                     title = t.get("title", "Sin título").strip()
                     status = t.get("status", "notStarted")
@@ -213,14 +215,19 @@ class OutlookIntegration:
 
                     card_lines = [f"{status_emoji} **{idx}. {title}**"]
 
-                    # 1. Due Date
+                    # 1. Due Date / Expiration
                     due = t.get("dueDateTime", {}).get("dateTime", None)
                     if due:
                         try:
-                            dt = datetime.fromisoformat(due.replace("Z", "+00:00"))
-                            card_lines.append(f"   ⏰ *Vence*: `{dt.strftime('%d/%m/%Y')}`")
+                            dt = datetime.fromisoformat(due.replace("Z", "+00:00")).replace(tzinfo=None)
+                            if dt < now:
+                                card_lines.append(f"   🚨 *EXPIRADA / VENCIDA*: `{dt.strftime('%d/%m/%Y')}`")
+                            else:
+                                card_lines.append(f"   ⏰ *Vence*: `{dt.strftime('%d/%m/%Y')}`")
                         except Exception:
                             card_lines.append(f"   ⏰ *Vence*: `{due[:10]}`")
+                    else:
+                        card_lines.append("   ⏰ *Vence*: _Sin fecha de expiración_")
 
                     # 2. Recurrence
                     rec = t.get("recurrence")
@@ -235,6 +242,8 @@ class OutlookIntegration:
                             card_lines.append("   🔄 *Recurrencia*: Diaria")
                         else:
                             card_lines.append(f"   🔄 *Recurrencia*: Activa ({rec_type})")
+                    else:
+                        card_lines.append("   🔄 *Recurrencia*: _Sin recurrencia (No recurrente)_")
 
                     # 3. Notes / Description
                     body_content = t.get("body", {}).get("content", "").strip()
@@ -263,6 +272,215 @@ class OutlookIntegration:
                 return f"❌ Error al consultar tareas de Outlook ({res.status_code}): {res.text}"
         except Exception as e:
             logger.error(f"[Outlook API] Fetch tasks exception: {e}")
+            return f"❌ Error de conexión al consultar tareas: {e}"
+
+    def get_overdue_tasks(self) -> str:
+        """Retrieves overdue/expired Outlook To-Do tasks."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"📋 **Tareas Expiradas (Modo Simulación)**:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top=50"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code != 200:
+                return f"❌ Error al consultar las tareas ({res.status_code}): {res.text}"
+
+            tasks = res.json().get("value", [])
+            now = datetime.now()
+
+            overdue_tasks = []
+            for t in tasks:
+                due = t.get("dueDateTime", {}).get("dateTime", None)
+                if due:
+                    try:
+                        dt = datetime.fromisoformat(due.replace("Z", "+00:00")).replace(tzinfo=None)
+                        if dt < now:
+                            overdue_tasks.append((t, dt))
+                    except Exception:
+                        pass
+
+            if not overdue_tasks:
+                return "🎉 ¡Excelente! No tienes ninguna tarea expirada o vencida en Outlook To-Do."
+
+            lines = [
+                "🚨 **TAREAS EXPIRADAS / VENCIDAS (Outlook To-Do)**",
+                "───────────────────────────\n"
+            ]
+            import re
+            for idx, (t, dt) in enumerate(overdue_tasks, start=1):
+                title = t.get("title", "Sin título").strip()
+                date_fmt = dt.strftime("%d/%m/%Y")
+                card_lines = [
+                    f"⚠️ **{idx}. {title}**",
+                    f"   🚨 *Expiró el*: `{date_fmt}`"
+                ]
+
+                body_content = t.get("body", {}).get("content", "").strip()
+                if body_content:
+                    clean_notes = re.sub(r'<[^>]+>', '', body_content).strip()
+                    if clean_notes:
+                        card_lines.append(f"   📝 *Nota*: _{clean_notes}_")
+
+                lines.append("\n".join(card_lines) + "\n")
+
+            lines.append("───────────────────────────")
+            lines.append(f"💡 *Total de tareas expiradas*: `{len(overdue_tasks)}`")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"[Outlook API] Get overdue tasks exception: {e}")
+            return f"❌ Error al consultar tareas expiradas: {e}"
+
+    def set_task_due_date(self, task_input: str, date_str: str) -> str:
+        """Sets or updates due date for a task in Outlook To-Do."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        import re
+        try:
+            if "mañana" in date_str.lower():
+                target_dt = datetime.now() + timedelta(days=1)
+            elif "hoy" in date_str.lower():
+                target_dt = datetime.now()
+            else:
+                d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
+                if d_match:
+                    target_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)))
+                else:
+                    d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
+                    if d_match2:
+                        target_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)))
+                    else:
+                        target_dt = datetime.now() + timedelta(days=7)
+        except Exception:
+            target_dt = datetime.now() + timedelta(days=7)
+
+        iso_date = target_dt.strftime("%Y-%m-%dT00:00:00.0000000")
+        fmt_date = target_dt.strftime("%d/%m/%Y")
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top=50"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code != 200:
+                return f"❌ Error al consultar las tareas ({res.status_code}): {res.text}"
+
+            tasks = res.json().get("value", [])
+            numbers = [int(n) for n in re.findall(r'\b\d+\b', task_input)]
+
+            targets = []
+            if numbers:
+                for num in numbers:
+                    if 1 <= num <= len(tasks):
+                        targets.append(tasks[num - 1])
+            else:
+                clean_input = task_input.lower().strip()
+                for t in tasks:
+                    if clean_input in t.get("title", "").lower():
+                        targets.append(t)
+
+            if not targets:
+                return f"⚠️ No encontré ninguna tarea que coincida con `{task_input}`."
+
+            updated = []
+            for t in targets:
+                tid = t.get("id")
+                title = t.get("title", "Sin título")
+                patch_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks/{tid}"
+                patch_res = requests.patch(patch_url, headers=headers, json={"dueDateTime": {"dateTime": iso_date, "timeZone": "UTC"}})
+                if patch_res.status_code in [200, 204]:
+                    updated.append(title)
+
+            lines = ["⏰ **FECHA DE EXPIRACIÓN ACTUALIZADA EN OUTLOOK**", "───────────────────────────\n"]
+            for title in updated:
+                lines.append(f"📌 **{title}**\n   ⏰ *Nueva fecha de expiración*: `{fmt_date}`\n")
+            lines.append("───────────────────────────")
+            lines.append("🎉 ¡Sincronizado con Microsoft Outlook!")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"[Outlook API] Set due date exception: {e}")
+            return f"❌ Error al actualizar fecha de expiración: {e}"
+
+    def set_task_recurrence(self, task_input: str, enable: bool = True, freq: str = "monthly") -> str:
+        """Activates or deactivates recurrence for a task in Outlook To-Do."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top=50"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code != 200:
+                return f"❌ Error al consultar tareas ({res.status_code}): {res.text}"
+
+            tasks = res.json().get("value", [])
+            import re
+            numbers = [int(n) for n in re.findall(r'\b\d+\b', task_input)]
+
+            targets = []
+            if numbers:
+                for num in numbers:
+                    if 1 <= num <= len(tasks):
+                        targets.append(tasks[num - 1])
+            else:
+                clean_input = task_input.lower().strip()
+                for t in tasks:
+                    if clean_input in t.get("title", "").lower():
+                        targets.append(t)
+
+            if not targets:
+                return f"⚠️ No encontré ninguna tarea que coincida con `{task_input}`."
+
+            if enable:
+                rec_payload = {
+                    "pattern": {
+                        "type": "absoluteMonthly" if "mes" in freq or "monthly" in freq else "weekly",
+                        "interval": 1,
+                        "dayOfMonth": 1
+                    },
+                    "range": {
+                        "type": "noEnd",
+                        "startDate": datetime.now().strftime("%Y-%m-%d")
+                    }
+                }
+                status_msg = "🔄 Recurrencia ACTIVADA (Mensual)"
+            else:
+                rec_payload = None
+                status_msg = "🚫 Recurrencia DESACTIVADA"
+
+            updated = []
+            for t in targets:
+                tid = t.get("id")
+                title = t.get("title", "Sin título")
+                patch_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks/{tid}"
+                patch_res = requests.patch(patch_url, headers=headers, json={"recurrence": rec_payload})
+                if patch_res.status_code in [200, 204]:
+                    updated.append(title)
+
+            lines = ["🔄 **ESTADO DE RECURRENCIA ACTUALIZADO EN OUTLOOK**", "───────────────────────────\n"]
+            for title in updated:
+                lines.append(f"📌 **{title}**\n   {status_msg}\n")
+            lines.append("───────────────────────────")
+            lines.append("🎉 ¡Sincronizado con Microsoft Outlook!")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"[Outlook API] Set recurrence exception: {e}")
+            return f"❌ Error al cambiar recurrencia: {e}"
             return f"❌ Error de conexión al consultar tareas: {e}"
 
     def complete_task(self, task_input: str) -> str:

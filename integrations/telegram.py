@@ -53,6 +53,14 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
                 response = outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
+            elif any(w in low for w in ["expirada", "expiradas", "vencida", "vencidas", "atrasada", "atrasadas"]):
+                response = outlook.get_overdue_tasks()
+            elif "desactivar recurrencia" in low or "quitar recurrencia" in low:
+                response = outlook.set_task_recurrence(user_text, enable=False)
+            elif "activar recurrencia" in low or "hacer recurrente" in low:
+                response = outlook.set_task_recurrence(user_text, enable=True)
+            elif any(w in low for w in ["cambiar fecha", "poner fecha", "vencer el", "vencer en", "fecha limite"]):
+                response = outlook.set_task_due_date(user_text, user_text)
             elif any(w in low for w in ["completar", "completada", "completadas", "marcar como completada", "marca como completada", "marcar completada", "marcar tarea", "completar tarea"]):
                 response = outlook.complete_task(user_text)
             elif any(w in low for w in ["tarea", "tareas", "todo", "todos", "pendiente", "pendientes"]):
