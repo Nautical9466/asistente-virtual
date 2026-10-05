@@ -117,3 +117,49 @@ class OutlookIntegration:
             return f"📧 **Correo Enviado con Éxito vía Outlook** a `{recipient}`."
         else:
             return f"❌ Error enviando correo vía Outlook: {res.text}"
+
+    def get_calendar_events(self, days_ahead: int = 14) -> str:
+        """Retrieves upcoming calendar events from Outlook via Microsoft Graph API."""
+        token = self._get_access_token()
+        if not token:
+            return "📅 **Agenda Outlook (Modo Simulación)**: Conecta tu token de Outlook en Render para ver eventos reales."
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        now = datetime.now()
+        start_str = now.strftime("%Y-%m-%dT00:00:00Z")
+        end_str = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT23:59:59Z")
+
+        url = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={start_str}&endDateTime={end_str}&$orderby=start/dateTime&$top=25"
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                events = res.json().get("value", [])
+                if not events:
+                    return f"📅 **Agenda Outlook**: No tienes eventos agendados para los próximos {days_ahead} días."
+
+                lines = [f"📅 **Tus próximos eventos en Outlook (próximos {days_ahead} días)**:\n"]
+                for e in events:
+                    subject = e.get("subject", "Sin título")
+                    start_data = e.get("start", {})
+                    dt_str = start_data.get("dateTime", "")
+                    try:
+                        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                        date_fmt = dt.strftime("%d/%m/%Y a las %H:%M")
+                    except Exception:
+                        date_fmt = dt_str[:16]
+                    link = e.get("webLink", "")
+                    if link:
+                        lines.append(f"• **[{subject}]({link})** — `{date_fmt}`")
+                    else:
+                        lines.append(f"• **{subject}** — `{date_fmt}`")
+                return "\n".join(lines)
+            else:
+                logger.error(f"[Outlook API] Fetch events error: {res.text}")
+                return f"❌ Error al obtener eventos de Outlook ({res.status_code}): {res.text}"
+        except Exception as e:
+            logger.error(f"[Outlook API] Fetch events exception: {e}")
+            return f"❌ Error de conexión al consultar Outlook: {e}"

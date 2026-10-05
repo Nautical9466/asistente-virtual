@@ -53,6 +53,9 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
                 response = outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
+            elif any(w in low for w in ["evento", "eventos", "calendario", "agenda", "agendado", "programado"]) and any(w in low for w in ["tengo", "ver", "revisar", "mostrar", "cuál", "cual", "cuáles", "cuales", "próxima", "proxima", "semana", "mes", "hay", "que tengo", "mis"]):
+                days = 30 if "mes" in low else 14
+                response = outlook.get_calendar_events(days_ahead=days)
             else:
                 # All conversational questions & queries are answered intelligently by AI (Groq/Gemini/Qwen)
                 response = message_handler_callback(user_text, user_id)
