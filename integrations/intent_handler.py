@@ -73,13 +73,15 @@ class OutlookIntentParser:
                 time_fmt = target_dt.strftime("%H:%M")
                 
                 res_msg = (
-                    f"Con mucho gusto, {user_name}.\n\n"
                     f"⏰ **Recordatorio por Mensaje Programado**\n"
                     f"───────────────────────────\n"
                     f"📌 **Motivo**: {reason}\n"
                     f"⏰ **Hora programada**: `{time_fmt} hs`\n"
                     f"💬 **Canal**: Mensaje directo por este chat de Telegram.\n\n"
-                    f"*(Nota: No se creó ningún evento en Outlook ni tarea en To-Do, se enviará únicamente como un mensaje directo por este chat)*"
+                    f"*(Se enviará únicamente como un mensaje directo por este chat)*\n\n"
+                    f"💡 **¿Qué deseas hacer a continuación?**\n"
+                    f"1. Si quieres ajustar la hora o cambiar el motivo, dime el nuevo horario.\n"
+                    f"2. Si prefieres convertirlo también en evento de Outlook o tarea To-Do, avísame."
                 )
                 return True, (res_msg, delay_sec, reason)
 
@@ -96,7 +98,8 @@ class OutlookIntentParser:
             list_title = re.sub(r'[\'\"\\]+$', '', list_title).strip()
             if list_title:
                 res = self.outlook.create_todo_list(list_title)
-                return True, f"Con mucho gusto, {user_name}.\n\n{res}"
+                next_opts = "\n\n💡 **Opciones a continuación:**\n1. Añadir tareas a esta nueva lista.\n2. Renombrar o reorganizar otras listas."
+                return True, f"{res}{next_opts}"
 
         # 2. TASK CREATION WITH OPTIONAL TARGET LIST AND NOTE
         task_kw = any(w in low for w in ["añade una tarea", "a;ade una tarea", "añadir tarea", "a;adir tarea", "agrega una tarea", "agreges una tarea", "crea una tarea", "pon una tarea", "crear tarea:", "agendar tarea:"])
@@ -140,7 +143,8 @@ class OutlookIntentParser:
             title = re.sub(r'[\'\"\\]+$', '', title).strip()
             if title:
                 res = self.outlook.create_task(title=title, description=note, list_name=list_name)
-                return True, f"Con mucho gusto, {user_name}.\n\n{res}"
+                next_opts = "\n\n💡 **Opciones a continuación:**\n1. Establecer fecha de vencimiento a la tarea.\n2. Agregar más tareas o subtareas."
+                return True, f"{res}{next_opts}"
 
         # 3. LIST DELETION
         if ("lista" in low and any(w in low for w in ["elimina", "borra", "quitar", "remover"])) and not "subtarea" in low:
@@ -155,7 +159,8 @@ class OutlookIntentParser:
             list_name = re.sub(r'[\'\"\\]+$', '', list_name).strip()
             if list_name:
                 res = self.outlook.delete_todo_list(list_name)
-                return True, f"Claro que sí, {user_name}.\n\n{res}"
+                next_opts = "\n\n💡 **Opciones a continuación:**\n1. Ver la lista actualizada de tus listas To-Do.\n2. Limpiar otras listas duplicadas."
+                return True, f"{res}{next_opts}"
 
         # 4. SUBTASK DELETION
         if "subtarea" in low and any(w in low for w in ["elimina", "borra", "quitar", "remover"]):
@@ -166,22 +171,26 @@ class OutlookIntentParser:
                 res_parts.append(self.outlook.delete_subtasks_from_list("Compras - Colonia"))
             if not res_parts:
                 res_parts.append(self.outlook.delete_subtasks_from_list(raw))
-            return True, f"Claro que sí, {user_name}.\n\n" + "\n".join(res_parts)
+            next_opts = "\n\n💡 **Opciones a continuación:**\n1. Ver tus tareas pendientes consolidadas.\n2. Agregar nuevos productos a tus compras."
+            return True, "\n".join(res_parts) + next_opts
 
         # 5. DUPLICATE LIST CLEANUP & CONSOLIDATION
         if any(w in low for w in ["duplicada", "duplicadas", "consolida", "consolidar", "consolidation", "solo deberia haber una", "unificar", "fusionar"]):
             res = self.outlook.delete_duplicate_lists()
-            return True, f"Por supuesto, {user_name}.\n\n{res}"
+            next_opts = "\n\n💡 **Opciones a continuación:**\n1. Revisar las tareas dentro de la lista consolidada.\n2. Crear nuevas agrupaciones de listas."
+            return True, f"{res}{next_opts}"
 
         # 6. RECURRING / ANNUAL CALENDAR QUERY
         if any(w in low for w in ["repetitivos", "recurrentes", "calendario anual", "eventos del año", "eventos de este año", "agenda anual"]):
             res = self.outlook.get_recurring_calendar_events(2026)
-            return True, f"Con mucho gusto, {user_name}.\n\n{res}"
+            next_opts = "\n\n💡 **Opciones a continuación:**\n1. Convertir eventos de pagos en tareas de To-Do con nomenclatura limpia.\n2. Eliminar eventos de calendario antiguos o duplicados."
+            return True, f"{res}{next_opts}"
 
         # 7. CALENDAR EVENT DELETION
         if any(w in low for w in ["elimines los cumplea", "eliminar los cumplea", "borrar los cumplea", "elimina los cumplea", "elimina el evento", "eliminar evento", "borra el evento", "borrar evento"]):
             res = self.outlook.delete_calendar_event(raw)
-            return True, f"Con mucho gusto, {user_name}.\n\n{res}"
+            next_opts = "\n\n💡 **Opciones a continuación:**\n1. Consultar tu agenda de eventos actualizada.\n2. Programar nuevos recordatorios o tareas."
+            return True, f"{res}{next_opts}"
 
         # 8. CALENDAR EVENT CREATION
         if any(w in low for w in ["agendar evento", "crear evento", "nuevo evento", "agenda un evento"]):
@@ -196,6 +205,7 @@ class OutlookIntentParser:
                     event_title = raw
 
             res = self.outlook.create_event(event_title, raw)
-            return True, f"Claro que sí, {user_name}.\n\n{res}"
+            next_opts = "\n\n💡 **Opciones a continuación:**\n1. Ajustar el recordatorio previo (ej: 1 día antes).\n2. Agregar invitados o enlace de reunión de Teams."
+            return True, f"{res}{next_opts}"
 
         return False, ""
