@@ -19,6 +19,15 @@ logger = logging.getLogger("VirtualAssistantServer")
 
 app = Flask(__name__)
 
+# Fallback Client ID for Azure Microsoft OAuth
+REAL_CLIENT_ID = "f6e2f39f-26b6-4339-827f-771c5f8e0e1a"
+
+def get_outlook_client_id() -> str:
+    cid = os.environ.get("OUTLOOK_CLIENT_ID")
+    if not cid or cid.startswith("e3b9") or cid.startswith("OB78Q"):
+        return REAL_CLIENT_ID
+    return cid
+
 def handle_incoming_message(user_input: str, user_id: str = "default") -> str:
     """Central processing logic for messages from Telegram, WhatsApp, or Web."""
     try:
@@ -48,12 +57,8 @@ def health_check():
 @app.route("/auth/outlook", methods=["GET"])
 def outlook_auth_login():
     """Redirects user to Microsoft OAuth login page."""
-    client_id = os.environ.get("OUTLOOK_CLIENT_ID")
+    client_id = get_outlook_client_id()
     tenant_id = os.environ.get("OUTLOOK_TENANT_ID", "common")
-
-    if not client_id or len(client_id) < 10:
-        client_id = "f6e2f39f-26b6-4339-827f-771c5f8e0e1a"
-
     redirect_uri = request.host_url.rstrip("/") + "/auth/callback"
     scope = "offline_access Calendars.ReadWrite Tasks.ReadWrite Mail.Send"
 
@@ -75,12 +80,12 @@ def outlook_auth_callback():
     if not code:
         return "⚠️ No se recibió código de autorización de Microsoft.", 400
 
-    client_id = os.environ.get("OUTLOOK_CLIENT_ID")
+    client_id = get_outlook_client_id()
     client_secret = os.environ.get("OUTLOOK_CLIENT_SECRET")
     tenant_id = os.environ.get("OUTLOOK_TENANT_ID", "common")
 
-    if not client_id or len(client_id) < 10:
-        client_id = "f6e2f39f-26b6-4339-827f-771c5f8e0e1a"
+    if not client_secret:
+        return "⚠️ Falta la variable `OUTLOOK_CLIENT_SECRET` en el panel de Render -> Environment.", 400
 
     redirect_uri = request.host_url.rstrip("/") + "/auth/callback"
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
