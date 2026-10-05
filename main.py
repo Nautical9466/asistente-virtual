@@ -51,8 +51,8 @@ def outlook_auth_login():
     client_id = os.environ.get("OUTLOOK_CLIENT_ID")
     tenant_id = os.environ.get("OUTLOOK_TENANT_ID", "common")
 
-    if not client_id or client_id.startswith("OB78Q"):
-        return "⚠️ Error: `OUTLOOK_CLIENT_ID` no es un GUID válido. Revisa tu .env (intercambiaste Client ID y Secret).", 400
+    if not client_id or len(client_id) < 10:
+        client_id = "f6e2f39f-26b6-4339-827f-771c5f8e0e1a"
 
     redirect_uri = request.host_url.rstrip("/") + "/auth/callback"
     scope = "offline_access Calendars.ReadWrite Tasks.ReadWrite Mail.Send"
@@ -78,9 +78,13 @@ def outlook_auth_callback():
     client_id = os.environ.get("OUTLOOK_CLIENT_ID")
     client_secret = os.environ.get("OUTLOOK_CLIENT_SECRET")
     tenant_id = os.environ.get("OUTLOOK_TENANT_ID", "common")
-    redirect_uri = request.host_url.rstrip("/") + "/auth/callback"
 
+    if not client_id or len(client_id) < 10:
+        client_id = "f6e2f39f-26b6-4339-827f-771c5f8e0e1a"
+
+    redirect_uri = request.host_url.rstrip("/") + "/auth/callback"
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+
     payload = {
         "client_id": client_id,
         "client_secret": client_secret,
