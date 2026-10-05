@@ -245,7 +245,84 @@ class OutlookIntegration:
         except Exception as e:
             return 500, [], str(e)
 
+    def create_todo_list(self, list_name: str) -> str:
+        """Creates a new task list in Outlook To-Do / Microsoft Tasks."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        payload = {"displayName": list_name.strip()}
+        try:
+            res = requests.post(url, headers=headers, json=payload)
+            if res.status_code in [200, 201]:
+                return f"📁 **NUEVA LISTA CREADA EN OUTLOOK TO-DO**\n\n✨ Se creó con éxito la lista: **\"{list_name.strip()}\"**.\n\nYa puedes agregarle tareas usando: `crear tarea: Nombre de la tarea`"
+            else:
+                return f"❌ Error creando lista en Outlook ({res.status_code}): {res.text}"
+        except Exception as e:
+            return f"❌ Error de conexión al crear lista: {e}"
+
+    def get_all_lists_grouped(self) -> str:
+        """Retrieves all Outlook To-Do lists and groups tasks by list."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"📋 **Listas de Outlook (Modo Simulación)**:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        try:
+            res = requests.get(lists_url, headers=headers, timeout=10)
+            if res.status_code != 200:
+                return f"❌ Error consultando listas ({res.status_code}): {res.text}"
+
+            todo_lists = res.json().get("value", [])
+            if not todo_lists:
+                return "📁 No tienes listas registradas en tu cuenta de Outlook To-Do."
+
+            output_lines = [
+                "📁 **TODAS TUS LISTAS EN OUTLOOK TO-DO Y SUS TAREAS**",
+                "───────────────────────────\n"
+            ]
+
+            total_all_tasks = 0
+            for l in todo_lists:
+                lid = l.get("id")
+                lname = l.get("displayName", "Sin nombre")
+
+                url_tasks = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
+                t_res = requests.get(url_tasks, headers=headers, timeout=8)
+                tasks = t_res.json().get("value", []) if t_res.status_code == 200 else []
+                total_all_tasks += len(tasks)
+
+                output_lines.append(f"📂 **Lista: {lname}** (`{len(tasks)} pendientes`)")
+                if not tasks:
+                    output_lines.append("   └─ _(Sin tareas pendientes en esta lista)_\n")
+                else:
+                    for t in tasks:
+                        title = t.get("title", "Sin título").strip()
+                        output_lines.append(f"   ▫️ {title}")
+                    output_lines.append("")
+
+            output_lines.append("───────────────────────────")
+            output_lines.append(f"💡 *Total de Listas*: `{len(todo_lists)}` | *Total Pendientes*: `{total_all_tasks}`")
+            output_lines.append("\n➕ **¿Puedo crear una lista nueva?**")
+            output_lines.append("¡Sí! Para crear una lista nueva, solo escríbeme:\n`crear lista: Nombre De Tu Lista`\n\n*Detalles necesarios*: Únicamente necesitas darme el nombre deseado para la nueva lista.")
+
+            return "\n".join(output_lines)
+        except Exception as e:
+            return f"❌ Error al consultar listas: {e}"
+
     def get_tasks(self) -> str:
+
         """Retrieves pending Outlook To-Do tasks across ALL lists with subtasks, notes, due dates, and recurrence via Microsoft Graph API."""
         token, err_detail = self._get_access_token_detail()
         if not token:

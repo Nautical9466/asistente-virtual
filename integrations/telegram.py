@@ -50,9 +50,14 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             elif low.startswith("crear tarea:") or low.startswith("agendar tarea:"):
                 task_title = user_text.split(":", 1)[1].strip()
                 response = outlook.create_task(task_title)
+            elif low.startswith("crear lista:") or low.startswith("nueva lista:"):
+                list_title = user_text.split(":", 1)[1].strip()
+                response = outlook.create_todo_list(list_title)
             elif low.startswith("enviar correo:") or low.startswith("mandar mail:"):
                 mail_details = user_text.split(":", 1)[1].strip()
                 response = outlook.send_email("destinatario@ejemplo.com", "Mensaje desde Asistente", mail_details)
+            elif any(w in low for w in ["listas", "mis listas", "todas las listas", "lista extra", "crear una lista"]):
+                response = outlook.get_all_lists_grouped()
             elif any(w in low for w in ["expirada", "expiradas", "vencida", "vencidas", "vencio", "venció", "vencido", "vencidos", "atrasada", "atrasadas", "atrasado", "atrasados", "oct 1", "1 de octubre", "1 oct", "octubre 1"]):
                 response = outlook.get_overdue_tasks()
             elif low.startswith("buscar tarea:") or low.startswith("busca tarea:"):
@@ -77,8 +82,12 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
                 # All conversational questions & queries are answered intelligently by AI (Groq/Gemini/Qwen)
                 response = message_handler_callback(user_text, user_id)
 
+            try:
+                await update.message.reply_text(response, parse_mode="Markdown")
+            except Exception as e:
+                logger.warning(f"[Telegram] Markdown send failed ({e}), sending plain text fallback.")
+                await update.message.reply_text(response)
 
-            await update.message.reply_text(response, parse_mode="Markdown")
 
         async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.photo:
