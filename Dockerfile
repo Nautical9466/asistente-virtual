@@ -19,10 +19,11 @@ COPY . .
 # Ensure data directory exists
 RUN mkdir -p data user/memory
 
-EXPOSE 5000
+ENV PORT=5000
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:5000/ || exit 1
+    CMD curl -f http://localhost:${PORT}/ || exit 1
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "main:app"]
+# Run Gunicorn with 1 worker and 2 threads to stay under Render 512MB limit (~120MB usage)
+CMD exec gunicorn -w 1 --threads 2 -b 0.0.0.0:${PORT} main:app

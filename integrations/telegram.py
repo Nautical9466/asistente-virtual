@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 telegram_app = None
 
 def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> bool:
-    """Configures and starts Telegram Bot polling in a background thread."""
+    """Configures Telegram Bot with photo receipt processing, forum topic detection, and Outlook routing."""
     global telegram_app
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
 
@@ -19,37 +19,83 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
     try:
         from telegram import Update
         from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+        from skills.finance_receipt_manager import FinanceReceiptManager
+        from integrations.outlook import OutlookIntegration
+
+        receipt_manager = FinanceReceiptManager()
+        outlook = OutlookIntegration()
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "👋 **¡Hola! Soy tu Asistente Virtual 24/7.**\n\n"
                 "Puedo ayudarte con:\n"
-                "📱 **TikTok**: Organizar, transcribir y puntuar videos.\n"
-                "📚 **Aprendizaje**: Retos de ensayos, micro-objetivos diarios (15 min).\n"
-                "💼 **LinkedIn**: Búsqueda de empleo, mejora de CV y perfil.\n"
-                "🔗 **Integraciones**: Alarmas, Gantt ClickUp, Slack y más.\n\n"
-                "¿En qué trabajamos hoy?"
+                "📅 **Outlook**: Crear Eventos de Calendario o Tareas To-Do.\n"
+                "🧾 **Finanzas**: Procesar fotos de recibos, analizarlos con IA y guardarlos organizados por carpeta en Google Drive.\n"
+                "📱 **TikTok & Aprendizaje**: Transcribir, agendar metas de 15 min y responder tus dudas."
             )
 
-        async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.text:
                 return
+
             user_id = str(update.message.from_user.id)
             user_text = update.message.text
+            low = user_text.lower()
 
-            try:
+            # Smart Outlook Routing: Event vs Task vs General Assistant
+            if "evento" in low or "reunion" in low or "cita" in low or "agendar evento" in low:
+                response = outlook.create_event(user_text, "Mañana 10:00")
+            elif "tarea" in low or "todo" in low or "recordar hacer" in low or "pendiente" in low:
+                response = outlook.create_task(user_text)
+            else:
                 response = message_handler_callback(user_text, user_id)
-                await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"[Telegram Error]: {e}")
-                await update.message.reply_text("❌ Ocurrió un error al procesar tu solicitud.")
+
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+        async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.photo:
+                return
+
+            # Identify Telegram Topic / Forum Channel Name
+            topic_name = "General"
+            if update.message.is_topic_message and update.message.reply_to_message:
+                if hasattr(update.message.reply_to_message, 'forum_topic_created'):
+                    topic_name = update.message.reply_to_message.forum_topic_created.name
+
+            # Fallback to caption or topic thread ID
+            caption = update.message.caption or ""
+            if not topic_name or topic_name == "General":
+                if "walmart" in caption.lower():
+                    topic_name = "Recibos de tarjeta Walmart"
+                elif "bachaso" in caption.lower():
+                    topic_name = "Bachasos"
+                elif "constancia" in caption.lower():
+                    topic_name = "Fotos de constancias"
+                elif "receta" in caption.lower():
+                    topic_name = "Recetas médicas"
+                else:
+                    thread_id = getattr(update.message, 'message_thread_id', None)
+                    topic_name = f"Canal_Topic_{thread_id}" if thread_id else "General"
+
+            await update.message.reply_text(f"⏳ Procesando recibo en canal `{topic_name}` con IA...")
+
+            # Get largest resolution photo
+            photo = update.message.photo[-1]
+            photo_file = await context.bot.get_file(photo.file_id)
+            file_bytes = await photo_file.download_as_bytearray()
+
+            filename = f"recibo_{photo.file_unique_id}.jpg"
+            result_msg = receipt_manager.process_receipt_image(bytes(file_bytes), topic_name, filename)
+
+            await update.message.reply_text(result_msg, parse_mode="Markdown")
 
         telegram_app = Application.builder().token(token).build()
         telegram_app.add_handler(CommandHandler("start", start))
-        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
+        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
         def run_polling():
-            logger.info("🚀 [Telegram] Iniciando bot en modo polling...")
+            logger.info("🚀 [Telegram Bot] Iniciando con soporte para recibos, Google Drive y Outlook Tasks...")
             telegram_app.run_polling(drop_pending_updates=True)
 
         thread = Thread(target=run_polling, daemon=True)
