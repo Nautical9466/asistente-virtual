@@ -15,10 +15,15 @@ class OutlookIntegration:
         self.refresh_token = os.environ.get("OUTLOOK_REFRESH_TOKEN")
         self.access_token = None
 
-    def _get_access_token(self) -> str:
-        """Refreshes Microsoft OAuth2 access token."""
-        if not self.client_id or not self.client_secret or not self.refresh_token:
-            return None
+    def _get_access_token_detail(self) -> tuple:
+        """Refreshes Microsoft OAuth2 access token and returns detailed status."""
+        missing = []
+        if not self.client_id: missing.append("OUTLOOK_CLIENT_ID")
+        if not self.client_secret: missing.append("OUTLOOK_CLIENT_SECRET")
+        if not self.refresh_token: missing.append("OUTLOOK_REFRESH_TOKEN")
+
+        if missing:
+            return None, f"Falta configurar en Render: `{', '.join(missing)}`."
 
         url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
         data = {
@@ -32,13 +37,19 @@ class OutlookIntegration:
             res = requests.post(url, data=data)
             if res.status_code == 200:
                 self.access_token = res.json().get("access_token")
-                return self.access_token
+                return self.access_token, "OK"
             else:
+                err_data = res.json() if res.headers.get("content-type", "").startswith("application/json") else {}
+                err_desc = err_data.get("error_description", res.text[:150])
                 logger.error(f"[Outlook API] Refresh Token Error: {res.text}")
-                return None
+                return None, f"Microsoft denegó el token (HTTP {res.status_code}): {err_desc}"
         except Exception as e:
             logger.error(f"[Outlook API] Connection Error: {e}")
-            return None
+            return None, f"Error de conexión con Microsoft: {e}"
+
+    def _get_access_token(self) -> str:
+        token, _ = self._get_access_token_detail()
+        return token
 
     def create_event(self, title: str, date_str: str, duration_minutes: int = 30) -> str:
         """Creates an Event in Outlook Calendar."""
@@ -120,9 +131,9 @@ class OutlookIntegration:
 
     def get_calendar_events(self, days_ahead: int = 14) -> str:
         """Retrieves upcoming calendar events from Outlook via Microsoft Graph API."""
-        token = self._get_access_token()
+        token, err_detail = self._get_access_token_detail()
         if not token:
-            return "📅 **Agenda Outlook (Modo Simulación)**: Conecta tu token de Outlook en Render para ver eventos reales."
+            return f"📅 **Agenda Outlook (Modo Simulación)**:\n{err_detail}"
 
         headers = {
             "Authorization": f"Bearer {token}",
