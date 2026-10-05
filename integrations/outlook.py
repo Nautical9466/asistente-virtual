@@ -181,6 +181,29 @@ class OutlookIntegration:
             logger.error(f"[Outlook API] Fetch events exception: {e}")
             return f"❌ Error de conexión al consultar Outlook: {e}"
 
+    def _fetch_outlook_tasks(self, headers: dict, top: int = 25) -> tuple:
+        """Fetches tasks from Microsoft Graph API with automatic retry fallback if 502 Bad Gateway occurs."""
+        url_with_expand = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top={top}"
+        url_simple = f"https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$top={top}"
+
+        try:
+            res = requests.get(url_with_expand, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return 200, res.json().get("value", []), ""
+            elif res.status_code in [500, 502, 503, 504]:
+                logger.warning(f"[Outlook API] HTTP {res.status_code} on expand checklistItems, retrying simple endpoint...")
+        except Exception as e:
+            logger.warning(f"[Outlook API] Exception on expand checklistItems: {e}")
+
+        try:
+            res = requests.get(url_simple, headers=headers, timeout=10)
+            if res.status_code == 200:
+                return 200, res.json().get("value", []), ""
+            else:
+                return res.status_code, [], res.text
+        except Exception as e:
+            return 500, [], str(e)
+
     def get_tasks(self) -> str:
         """Retrieves pending Outlook To-Do tasks with subtasks, notes, due dates, and recurrence via Microsoft Graph API."""
         token, err_detail = self._get_access_token_detail()
@@ -192,87 +215,80 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
-        url = "https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top=30"
-        try:
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                tasks = res.json().get("value", [])
-                if not tasks:
-                    return "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**:\n\n🎉 ¡Excelente! No tienes tareas pendientes registradas."
+        status_code, tasks, err_msg = self._fetch_outlook_tasks(headers, top=25)
+        if status_code != 200:
+            return f"❌ Error al consultar tareas de Outlook ({status_code}): {err_msg}"
 
-                lines = [
-                    "📋 **TUS TAREAS DETALLADAS (Outlook To-Do)**",
-                    "───────────────────────────\n"
-                ]
+        if not tasks:
+            return "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**:\n\n🎉 ¡Excelente! No tienes tareas pendientes registradas."
 
-                import re
-                now = datetime.now()
+        lines = [
+            "📋 **TUS TAREAS DETALLADAS (Outlook To-Do)**",
+            "───────────────────────────\n"
+        ]
 
-                for idx, t in enumerate(tasks, start=1):
-                    title = t.get("title", "Sin título").strip()
-                    status = t.get("status", "notStarted")
-                    status_emoji = "⏳" if status == "inProgress" else "📌"
+        import re
+        now = datetime.now()
 
-                    card_lines = [f"{status_emoji} **{idx}. {title}**"]
+        for idx, t in enumerate(tasks, start=1):
+            title = t.get("title", "Sin título").strip()
+            status = t.get("status", "notStarted")
+            status_emoji = "⏳" if status == "inProgress" else "📌"
 
-                    # 1. Due Date / Expiration
-                    due = t.get("dueDateTime", {}).get("dateTime", None)
-                    if due:
-                        try:
-                            dt = datetime.fromisoformat(due.replace("Z", "+00:00")).replace(tzinfo=None)
-                            if dt < now:
-                                card_lines.append(f"   🚨 *EXPIRADA / VENCIDA*: `{dt.strftime('%d/%m/%Y')}`")
-                            else:
-                                card_lines.append(f"   ⏰ *Vence*: `{dt.strftime('%d/%m/%Y')}`")
-                        except Exception:
-                            card_lines.append(f"   ⏰ *Vence*: `{due[:10]}`")
+            card_lines = [f"{status_emoji} **{idx}. {title}**"]
+
+            # 1. Due Date / Expiration
+            due = t.get("dueDateTime", {}).get("dateTime", None)
+            if due:
+                try:
+                    dt = datetime.fromisoformat(due.replace("Z", "+00:00")).replace(tzinfo=None)
+                    if dt < now:
+                        card_lines.append(f"   🚨 *EXPIRADA / VENCIDA*: `{dt.strftime('%d/%m/%Y')}`")
                     else:
-                        card_lines.append("   ⏰ *Vence*: _Sin fecha de expiración_")
-
-                    # 2. Recurrence
-                    rec = t.get("recurrence")
-                    if rec:
-                        rec_type = rec.get("pattern", {}).get("type", "")
-                        day = rec.get("pattern", {}).get("dayOfMonth", "")
-                        if "Monthly" in rec_type:
-                            card_lines.append(f"   🔄 *Recurrencia*: Mensual (Día {day})" if day else "   🔄 *Recurrencia*: Mensual")
-                        elif "Weekly" in rec_type:
-                            card_lines.append("   🔄 *Recurrencia*: Semanal")
-                        elif "Daily" in rec_type:
-                            card_lines.append("   🔄 *Recurrencia*: Diaria")
-                        else:
-                            card_lines.append(f"   🔄 *Recurrencia*: Activa ({rec_type})")
-                    else:
-                        card_lines.append("   🔄 *Recurrencia*: _Sin recurrencia (No recurrente)_")
-
-                    # 3. Notes / Description
-                    body_content = t.get("body", {}).get("content", "").strip()
-                    if body_content:
-                        clean_notes = re.sub(r'<[^>]+>', '', body_content).strip()
-                        if clean_notes:
-                            card_lines.append(f"   📝 *Nota*: _{clean_notes}_")
-
-                    # 4. Subtasks / Checklist Items
-                    checklists = t.get("checklistItems", [])
-                    if checklists:
-                        card_lines.append("   🔹 *Subtareas:*")
-                        for item in checklists:
-                            sub_title = item.get("displayName", "").strip()
-                            is_checked = item.get("isChecked", False)
-                            icon = "☑️" if is_checked else "▫️"
-                            card_lines.append(f"     {icon} {sub_title}")
-
-                    lines.append("\n".join(card_lines) + "\n")
-
-                lines.append("───────────────────────────")
-                lines.append(f"💡 *Total de pendientes*: `{len(tasks)} tareas`")
-                return "\n".join(lines)
+                        card_lines.append(f"   ⏰ *Vence*: `{dt.strftime('%d/%m/%Y')}`")
+                except Exception:
+                    card_lines.append(f"   ⏰ *Vence*: `{due[:10]}`")
             else:
-                logger.error(f"[Outlook API] Fetch tasks error: {res.text}")
-                return f"❌ Error al consultar tareas de Outlook ({res.status_code}): {res.text}"
-        except Exception as e:
-            logger.error(f"[Outlook API] Fetch tasks exception: {e}")
-            return f"❌ Error de conexión al consultar tareas: {e}"
+                card_lines.append("   ⏰ *Vence*: _Sin fecha de expiración_")
+
+            # 2. Recurrence
+            rec = t.get("recurrence")
+            if rec:
+                rec_type = rec.get("pattern", {}).get("type", "")
+                day = rec.get("pattern", {}).get("dayOfMonth", "")
+                if "Monthly" in rec_type:
+                    card_lines.append(f"   🔄 *Recurrencia*: Mensual (Día {day})" if day else "   🔄 *Recurrencia*: Mensual")
+                elif "Weekly" in rec_type:
+                    card_lines.append("   🔄 *Recurrencia*: Semanal")
+                elif "Daily" in rec_type:
+                    card_lines.append("   🔄 *Recurrencia*: Diaria")
+                else:
+                    card_lines.append(f"   🔄 *Recurrencia*: Activa ({rec_type})")
+            else:
+                card_lines.append("   🔄 *Recurrencia*: _Sin recurrencia (No recurrente)_")
+
+            # 3. Notes / Description
+            body_content = t.get("body", {}).get("content", "").strip()
+            if body_content:
+                clean_notes = re.sub(r'<[^>]+>', '', body_content).strip()
+                if clean_notes:
+                    card_lines.append(f"   📝 *Nota*: _{clean_notes}_")
+
+            # 4. Subtasks / Checklist Items
+            checklists = t.get("checklistItems", [])
+            if checklists:
+                card_lines.append("   🔹 *Subtareas:*")
+                for item in checklists:
+                    sub_title = item.get("displayName", "").strip()
+                    is_checked = item.get("isChecked", False)
+                    icon = "☑️" if is_checked else "▫️"
+                    card_lines.append(f"     {icon} {sub_title}")
+
+            lines.append("\n".join(card_lines) + "\n")
+
+        lines.append("───────────────────────────")
+        lines.append(f"💡 *Total de pendientes*: `{len(tasks)} tareas`")
+        return "\n".join(lines)
 
     def get_overdue_tasks(self) -> str:
         """Retrieves overdue/expired Outlook To-Do tasks."""
