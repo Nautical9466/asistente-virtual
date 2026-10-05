@@ -245,7 +245,65 @@ class OutlookIntegration:
         except Exception as e:
             return 500, [], str(e)
 
+    def get_full_context_for_llm(self) -> str:
+        """Retrieves complete context (all lists, pending tasks, and last 4 completed tasks per list) for LLM analysis."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"(No se pudo conectar a Outlook: {err_detail})"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        try:
+            res = requests.get(lists_url, headers=headers, timeout=10)
+            if res.status_code != 200:
+                return f"(Error al consultar listas de Microsoft Graph: {res.status_code})"
+
+            todo_lists = res.json().get("value", [])
+            lines = ["### CONTEXTO REAL Y EN VIVO DE OUTLOOK TO-DO (LISTAS, TAREAS PENDIENTES Y TAREAS CERRADAS DEL USUARIO):"]
+
+            for l in todo_lists:
+                lid = l.get("id")
+                lname = l.get("displayName", "Sin nombre")
+
+                # Pending tasks
+                url_pending = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
+                p_res = requests.get(url_pending, headers=headers, timeout=8)
+                p_tasks = p_res.json().get("value", []) if p_res.status_code == 200 else []
+
+                # Last 4 Completed tasks
+                url_completed = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status eq 'completed'&$top=4"
+                c_res = requests.get(url_completed, headers=headers, timeout=8)
+                c_tasks = c_res.json().get("value", []) if c_res.status_code == 200 else []
+
+                lines.append(f"\n📂 Lista: '{lname}'")
+                lines.append(f"  • Tareas Pendientes ({len(p_tasks)}):")
+                if not p_tasks:
+                    lines.append("    - (Sin tareas pendientes en esta lista)")
+                else:
+                    for t in p_tasks:
+                        title = t.get("title", "Sin título").strip()
+                        due = t.get("dueDateTime", {}).get("dateTime", "")
+                        due_str = f" [Vence: {due[:10]}]" if due else ""
+                        lines.append(f"    - {title}{due_str}")
+
+                lines.append(f"  • Últimas Tareas Cerradas/Completadas ({len(c_tasks)}):")
+                if not c_tasks:
+                    lines.append("    - (Sin tareas completadas recientemente en esta lista)")
+                else:
+                    for t in c_tasks:
+                        title = t.get("title", "Sin título").strip()
+                        lines.append(f"    - {title}")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"(Error al extraer contexto de Outlook: {e})"
+
     def create_todo_list(self, list_name: str) -> str:
+
         """Creates a new task list in Outlook To-Do / Microsoft Tasks."""
         token, err_detail = self._get_access_token_detail()
         if not token:

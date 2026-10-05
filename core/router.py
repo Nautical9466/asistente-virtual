@@ -40,12 +40,24 @@ class VirtualAssistant:
     def query(self, user_input: str, user_id: str = "default", model: str = "cerebro-groq", system_prompt: str = None) -> str:
         """Processes a query through LiteLLM across Groq, Gemini, and DeepInfra with fallbacks."""
         full_system_prompt = self.context_loader.get_full_system_prompt(system_prompt)
+
+        # Inject real-time Outlook context for task/list analysis queries
+        low = user_input.lower()
+        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "outlook", "cerrad", "completad", "pendiente", "mover", "analiz"]):
+            try:
+                from integrations.outlook import OutlookIntegration
+                outlook_ctx = OutlookIntegration().get_full_context_for_llm()
+                full_system_prompt += f"\n\n{outlook_ctx}"
+            except Exception as e:
+                logger.warning(f"[Router] Outlook context injection failed: {e}")
+
         history = self.memory.get_history(user_id)
 
         messages = [{"role": "system", "content": full_system_prompt}]
         for item in history:
             messages.append({"role": item["role"], "content": item["content"]})
         messages.append({"role": "user", "content": user_input})
+
 
         assistant_response = None
         import litellm
