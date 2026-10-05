@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from threading import Thread
 from typing import Callable, Optional
 
@@ -13,7 +14,7 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
 
     if not token or token.startswith("your_"):
-        logger.warning("[Telegram] TELEGRAM_BOT_TOKEN non-existent or unconfigured. Bot disabled.")
+        logger.warning("[Telegram] TELEGRAM_BOT_TOKEN non-existent or unconfigured in environment. Bot disabled.")
         return False
 
     try:
@@ -43,9 +44,9 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             low = user_text.lower()
 
             # Smart Outlook Routing: Event vs Task vs General Assistant
-            if "evento" in low or "reunion" in low or "cita" in low or "agendar evento" in low:
+            if "evento" in low or "reunion" in low or "cita" in low or "agendar evento" in low or "event" in low:
                 response = outlook.create_event(user_text, "Mañana 10:00")
-            elif "tarea" in low or "todo" in low or "recordar hacer" in low or "pendiente" in low:
+            elif "tarea" in low or "todo" in low or "recordar hacer" in low or "pendiente" in low or "task" in low:
                 response = outlook.create_task(user_text)
             else:
                 response = message_handler_callback(user_text, user_id)
@@ -79,7 +80,6 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
 
             await update.message.reply_text(f"⏳ Procesando recibo en canal `{topic_name}` con IA...")
 
-            # Get largest resolution photo
             photo = update.message.photo[-1]
             photo_file = await context.bot.get_file(photo.file_id)
             file_bytes = await photo_file.download_as_bytearray()
@@ -95,11 +95,14 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
         telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
         def run_polling():
-            logger.info("🚀 [Telegram Bot] Iniciando con soporte para recibos, Google Drive y Outlook Tasks...")
-            telegram_app.run_polling(drop_pending_updates=True)
+            logger.info("🚀 [Telegram Bot] Iniciando polling en segundo plano...")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            telegram_app.run_polling(drop_pending_updates=True, stop_signals=None)
 
         thread = Thread(target=run_polling, daemon=True)
         thread.start()
+        logger.info("✅ Thread de Telegram Bot iniciado correctamente.")
         return True
 
     except Exception as e:
