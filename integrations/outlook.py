@@ -90,6 +90,38 @@ class OutlookIntegration:
         except Exception:
             return target_date.replace(hour=9, minute=0, second=0)
 
+    def _parse_event_datetime(self, date_str: str) -> datetime:
+        """Helper to convert standard date/time string or ISO format into a datetime object."""
+        now = datetime.now()
+        if not date_str or not str(date_str).strip():
+            return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        
+        clean = str(date_str).strip()
+        try:
+            return datetime.fromisoformat(clean.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            pass
+
+        import re
+        try:
+            # Match YYYY-MM-DD HH:MM or YYYY-MM-DD
+            m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2}))?', clean)
+            if m:
+                hr = int(m.group(4)) if m.group(4) is not None else 9
+                mn = int(m.group(5)) if m.group(5) is not None else 0
+                return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), hr, mn)
+
+            # Match DD/MM/YYYY HH:MM or DD/MM/YYYY
+            m2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s](\d{1,2}):(\d{2}))?', clean)
+            if m2:
+                hr = int(m2.group(4)) if m2.group(4) is not None else 9
+                mn = int(m2.group(5)) if m2.group(5) is not None else 0
+                return datetime(int(m2.group(3)), int(m2.group(2)), int(m2.group(1)), hr, mn)
+        except Exception:
+            pass
+
+        return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
     def create_event(
         self,
         title: str,
@@ -102,7 +134,7 @@ class OutlookIntegration:
         description: str = "",
         auto_find_best_time: bool = False
     ) -> str:
-        """Creates an Event in Outlook Calendar with full customization (Teams, attendees, categories, reminders, smart scheduling)."""
+        """Creates an Event in Outlook Calendar via Microsoft Graph API using parameters parsed by the LLM."""
         token = self._get_access_token()
         if not token:
             return f"📅 **Evento Outlook agendado (Modo Simulación)**: '{title}' para {date_str} ({duration_minutes} min)."
@@ -112,94 +144,15 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
-        import re
-        now = datetime.now()
-        clean_date = (date_str or "").lower().strip()
         clean_title = (title or "").strip()
+        if not clean_title:
+            clean_title = description[:50].strip() if description else "Reunión Agendada"
 
-        # Handle generic phrases like "ponle cualquier cosa"
-        if any(phrase in clean_title.lower() for phrase in ["cualquier cosa", "cualquiera cosa", "lo que sea", "ponle cualquier"]):
-            if description:
-                clean_title = description[:50].strip()
-            else:
-                clean_title = "Evento de prueba"
-
-        # If title is missing, empty, or a generic placeholder
-        trivial_titles = [
-            "", "evento", "un evento", "nuevo evento", "reunion", "reunión", 
-            "crear evento", "agendar evento", "evento del dia", "evento del día",
-            "cita", "nuevo evento de calendario", "sin titulo", "sin título"
-        ]
-        if clean_title.lower() in trivial_titles or clean_title.lower().startswith("evento del d"):
-            # If the user has provided additional details (attendees, categories, or description), use a smart title instead of asking again
-            if description or attendees or categories:
-                if description:
-                    clean_title = description[:50].strip()
-                elif categories:
-                    cat_name = categories[0] if isinstance(categories, list) else str(categories)
-                    clean_title = f"Reunión - {cat_name}"
-                else:
-                    clean_title = "Evento Agendado"
-            else:
-                return (
-                    "📋 **INFORMACIÓN PARA CREAR TU EVENTO EN OUTLOOK**\n"
-                    "───────────────────────────\n\n"
-                    f"Entendido, Geral. Para agendar tu evento para **\"{date_str or 'hoy'}\"**, por favor confírmame los siguientes detalles:\n\n"
-                    "1. 📌 **Título / Asunto**: ¿Qué nombre o asunto tendrá la reunión/evento?\n"
-                    "2. ⏰ **Hora exacta y Duración**: (Ej: 4:00 PM, duración 1 hora)\n"
-                    "3. 💻 **Enlace de Teams**: ¿Deseas incluir enlace a Microsoft Teams? (Sí / No)\n"
-                    "4. 🏷️ **Etiqueta / Categoría**: ¿Deseas asignarle una categoría de color (ej: *Trabajo, Personal, Urgente*) o crear/usar una etiqueta específica?\n"
-                    "5. 👥 **Invitados o Notas**: ¿Deseas invitar a alguien enviándole un correo o agregar notas adicionales?"
-                )
-
-        target_time = None
-
-        # Parse AM/PM or HH:MM
-        pm_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', clean_date)
-        if pm_match:
-            hr = int(pm_match.group(1))
-            mn = int(pm_match.group(2)) if pm_match.group(2) else 0
-            ampm = pm_match.group(3)
-            if ampm == "pm" and hr < 12:
-                hr += 12
-            elif ampm == "am" and hr == 12:
-                hr = 0
-            target_time = (hr, mn)
-        else:
-            t_match = re.search(r'(\d{1,2}):(\d{2})', clean_date)
-            if t_match:
-                target_time = (int(t_match.group(1)), int(t_match.group(2)))
-
-        # Determine target date
-        if "hoy" in clean_date:
-            base_dt = now
-        elif "mañana" in clean_date or "manana" in clean_date:
-            base_dt = now + timedelta(days=1)
-        elif "sábado" in clean_date or "sabado" in clean_date:
-            days_ahead = (5 - now.weekday()) % 7
-            if days_ahead == 0: days_ahead = 7
-            base_dt = now + timedelta(days=days_ahead)
-        elif "domingo" in clean_date:
-            days_ahead = (6 - now.weekday()) % 7
-            if days_ahead == 0: days_ahead = 7
-            base_dt = now + timedelta(days=days_ahead)
-        else:
-            d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', clean_date)
-            if d_match:
-                base_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)))
-            else:
-                d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', clean_date)
-                if d_match2:
-                    base_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)))
-                else:
-                    base_dt = now
-
+        base_dt = self._parse_event_datetime(date_str)
         if auto_find_best_time:
             start_dt = self.find_best_time_slot(base_dt, duration_minutes)
-        elif target_time:
-            start_dt = base_dt.replace(hour=target_time[0], minute=target_time[1], second=0, microsecond=0)
         else:
-            start_dt = base_dt.replace(hour=9, minute=0, second=0, microsecond=0)
+            start_dt = base_dt
 
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 

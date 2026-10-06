@@ -78,26 +78,30 @@ class GoalOrchestrator:
 
     def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str, user_id: str = "default") -> Dict[str, Any]:
         """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
+        from datetime import datetime
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
+
         system_prompt = (
             "Eres el Orquestador Inteligente y Analista de Lenguaje Natural de Claudia OS / Jarvis.\n"
+            f"FECHA Y HORA ACTUAL DEL SISTEMA: {now_str}\n\n"
             "Tu tarea es analizar la intención del usuario entendiendo su lenguaje natural (incluso con modismos, frases casuales o peticiones múltiples) "
             "y mapearla a las herramientas MCP adecuadas en un JSON ESTRUCTURADO.\n\n"
             "HERRAMIENTAS MCP DISPONIBLES:\n"
-            "- get_calendar_events (para consultar la agenda, eventos programados, citas, fechas del mes/semana)\n"
-            "- create_calendar_event (title, time_str/date_str, duration_minutes, is_teams_meeting, categories, attendees, description)\n"
-            "- get_outlook_tasks (para consultar pendientes, tareas activas, listas de tareas, compromisos)\n"
-            "- create_outlook_task (title, description, list_name)\n"
-            "- complete_outlook_task (task_query, list_name_or_number)\n"
-            "- delete_outlook_task (task_query, list_name_or_number)\n"
-            "- move_outlook_task (task_query, destination_list_name, src_list_name_or_number)\n"
-            "- manage_todo_lists (action: create/delete/consolidate_duplicates, list_name)\n"
-            "- send_email (recipient, subject, body_content)\n"
-            "- general_query (para saludos simples como 'hola', preguntas generales, investigación o conversación habitual)\n\n"
-            "REGLAS DE CLASIFICACIÓN LINGÜÍSTICA:\n"
-            "1. Si el usuario realiza un saludo simple o conversación general (ej: 'hola', 'buenos días', 'quién eres'), asigna target_tool: general_query.\n"
-            "2. Si el usuario pide crear un evento en el calendario pero NO especifica explícitamente el título/asunto en su mensaje inicial, asigna title: \"\" para que el sistema solicite los datos.\n"
-            "3. Si el usuario está respondiendo a una solicitud previa de datos para un evento (ej: dando invitados, categorías, duración, notas o diciendo 'ponle cualquier asunto'), utiliza el HISTORIAL RECIENTE para combinar los parámetros de la solicitud anterior (fecha y hora inicial) con los nuevos detalles, y extrae un título claro del texto de la nota o asunto dado.\n"
-            "4. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
+            "- get_calendar_events (days_ahead: int)\n"
+            "- create_calendar_event (title: str, date_str: str, duration_minutes: int, is_teams_meeting: bool, categories: list, attendees: list, description: str)\n"
+            "- get_outlook_tasks (include_details: bool)\n"
+            "- create_outlook_task (title: str, description: str, list_name: str)\n"
+            "- complete_outlook_task (task_query: str, list_name_or_number: str)\n"
+            "- delete_outlook_task (task_query: str, list_name_or_number: str)\n"
+            "- move_outlook_task (task_query: str, destination_list_name: str)\n"
+            "- manage_todo_lists (action: str, list_name: str)\n"
+            "- send_email (recipient: str, subject: str, body_content: str)\n"
+            "- general_query (query: str) -> Usar para conversación general, aclaraciones, preguntas al usuario o cuando falten datos obligatorios.\n\n"
+            "REGLAS DE RAZONAMIENTO Y CLASIFICACIÓN:\n"
+            "1. CONVERSIÓN DE FECHAS: Utiliza la fecha y hora actual del sistema para convertir expresiones relativas (ej: 'hoy 3 pm', 'mañana a las 10', 'este viernes 4pm') a fechas ISO exactas (ej: '2026-10-06 15:00').\n"
+            "2. EVENTOS INCOMPLETOS: Si el usuario pide crear un evento pero NO ha dado suficiente información (falta título/asunto), asigna target_tool: general_query solicitando interactivamente los datos del evento.\n"
+            "3. CONTINUIDAD DE DETALLES: Si el usuario está respondiendo a una pregunta previa sobre los detalles de un evento (ej: 'ponle cualquier cosa de asunto, dure 15 mins...'), usa el HISTORIAL RECIENTE para combinar los datos anteriores (fecha/hora) con los nuevos. Si dice 'ponle cualquier cosa', extrae un título descriptivo adecuado basado en la nota o la categoría (ej: 'Evento de prueba').\n"
+            "4. MÚLTIPLES INTENCIONES: Genera un objeto en 'goals' para CADA meta si hay varias peticiones.\n"
             "5. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
 
