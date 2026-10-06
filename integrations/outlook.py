@@ -117,23 +117,40 @@ class OutlookIntegration:
         clean_date = (date_str or "").lower().strip()
         clean_title = (title or "").strip()
 
-        # If title is missing, empty, or a generic placeholder, ask the user interactively
+        # Handle generic phrases like "ponle cualquier cosa"
+        if any(phrase in clean_title.lower() for phrase in ["cualquier cosa", "cualquiera cosa", "lo que sea", "ponle cualquier"]):
+            if description:
+                clean_title = description[:50].strip()
+            else:
+                clean_title = "Evento de prueba"
+
+        # If title is missing, empty, or a generic placeholder
         trivial_titles = [
             "", "evento", "un evento", "nuevo evento", "reunion", "reunión", 
             "crear evento", "agendar evento", "evento del dia", "evento del día",
             "cita", "nuevo evento de calendario", "sin titulo", "sin título"
         ]
         if clean_title.lower() in trivial_titles or clean_title.lower().startswith("evento del d"):
-            return (
-                "📋 **INFORMACIÓN PARA CREAR TU EVENTO EN OUTLOOK**\n"
-                "───────────────────────────\n\n"
-                f"Entendido, Geral. Para agendar tu evento para **\"{date_str or 'hoy'}\"**, por favor confírmame los siguientes detalles:\n\n"
-                "1. 📌 **Título / Asunto**: ¿Qué nombre o asunto tendrá la reunión/evento?\n"
-                "2. ⏰ **Hora exacta y Duración**: (Ej: 4:00 PM, duración 1 hora)\n"
-                "3. 💻 **Enlace de Teams**: ¿Deseas incluir enlace a Microsoft Teams? (Sí / No)\n"
-                "4. 🏷️ **Etiqueta / Categoría**: ¿Deseas asignarle una categoría de color (ej: *Trabajo, Personal, Urgente*) o crear/usar una etiqueta específica?\n"
-                "5. 👥 **Invitados o Notas**: ¿Deseas invitar a alguien enviándole un correo o agregar notas adicionales?"
-            )
+            # If the user has provided additional details (attendees, categories, or description), use a smart title instead of asking again
+            if description or attendees or categories:
+                if description:
+                    clean_title = description[:50].strip()
+                elif categories:
+                    cat_name = categories[0] if isinstance(categories, list) else str(categories)
+                    clean_title = f"Reunión - {cat_name}"
+                else:
+                    clean_title = "Evento Agendado"
+            else:
+                return (
+                    "📋 **INFORMACIÓN PARA CREAR TU EVENTO EN OUTLOOK**\n"
+                    "───────────────────────────\n\n"
+                    f"Entendido, Geral. Para agendar tu evento para **\"{date_str or 'hoy'}\"**, por favor confírmame los siguientes detalles:\n\n"
+                    "1. 📌 **Título / Asunto**: ¿Qué nombre o asunto tendrá la reunión/evento?\n"
+                    "2. ⏰ **Hora exacta y Duración**: (Ej: 4:00 PM, duración 1 hora)\n"
+                    "3. 💻 **Enlace de Teams**: ¿Deseas incluir enlace a Microsoft Teams? (Sí / No)\n"
+                    "4. 🏷️ **Etiqueta / Categoría**: ¿Deseas asignarle una categoría de color (ej: *Trabajo, Personal, Urgente*) o crear/usar una etiqueta específica?\n"
+                    "5. 👥 **Invitados o Notas**: ¿Deseas invitar a alguien enviándole un correo o agregar notas adicionales?"
+                )
 
         target_time = None
 

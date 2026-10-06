@@ -6,6 +6,8 @@ import litellm
 from core.mcp_tools import mcp_registry
 from core.context_loader import ContextLoader
 
+from core.memory import MemoryManager
+
 logger = logging.getLogger("Orchestrator")
 
 class GoalOrchestrator:
@@ -13,6 +15,7 @@ class GoalOrchestrator:
 
     def __init__(self):
         self.context_loader = ContextLoader()
+        self.memory = MemoryManager()
 
     def process_request(self, user_input: str, user_id: str = "default", origin_metadata: Optional[Dict[str, Any]] = None) -> str:
         """Central pipeline:
@@ -28,7 +31,7 @@ class GoalOrchestrator:
         chat_title = origin_metadata.get("chat_title", "Chat Directo")
 
         # 1. Classify & Decompose Request into Structured Goals via LLM Reasoning
-        classification = self._classify_and_decompose(user_input, chat_type, chat_title)
+        classification = self._classify_and_decompose(user_input, chat_type, chat_title, user_id=user_id)
 
         goals = classification.get("goals", [])
         if not goals:
@@ -73,7 +76,7 @@ class GoalOrchestrator:
 
         return final_response
 
-    def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str) -> Dict[str, Any]:
+    def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str, user_id: str = "default") -> Dict[str, Any]:
         """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
         system_prompt = (
             "Eres el Orquestador Inteligente y Analista de Lenguaje Natural de Claudia OS / Jarvis.\n"
@@ -81,7 +84,7 @@ class GoalOrchestrator:
             "y mapearla a las herramientas MCP adecuadas en un JSON ESTRUCTURADO.\n\n"
             "HERRAMIENTAS MCP DISPONIBLES:\n"
             "- get_calendar_events (para consultar la agenda, eventos programados, citas, fechas del mes/semana)\n"
-            "- create_calendar_event (title, time_str, duration_minutes, description)\n"
+            "- create_calendar_event (title, time_str/date_str, duration_minutes, is_teams_meeting, categories, attendees, description)\n"
             "- get_outlook_tasks (para consultar pendientes, tareas activas, listas de tareas, compromisos)\n"
             "- create_outlook_task (title, description, list_name)\n"
             "- complete_outlook_task (task_query, list_name_or_number)\n"
@@ -92,16 +95,28 @@ class GoalOrchestrator:
             "- general_query (para saludos simples como 'hola', preguntas generales, investigación o conversación habitual)\n\n"
             "REGLAS DE CLASIFICACIÓN LINGÜÍSTICA:\n"
             "1. Si el usuario realiza un saludo simple o conversación general (ej: 'hola', 'buenos días', 'quién eres'), asigna target_tool: general_query.\n"
-            "2. Si el usuario pide crear un evento en el calendario pero NO especifica explícitamente el título/asunto exacto en su mensaje (ej: 'Quiero que crees un evento para hoy a las 4 pm'), NUNCA inventes o asumas títulos como 'Evento del dia' o 'Nuevo evento'. DEBES asignar title: \"\" en los parámetros de create_calendar_event para que el sistema solicite interactivamente la información completa.\n"
-            "3. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
-            "4. Responde ÚNICAMENTE con un JSON plano estructurado válido."
+            "2. Si el usuario pide crear un evento en el calendario pero NO especifica explícitamente el título/asunto en su mensaje inicial, asigna title: \"\" para que el sistema solicite los datos.\n"
+            "3. Si el usuario está respondiendo a una solicitud previa de datos para un evento (ej: dando invitados, categorías, duración, notas o diciendo 'ponle cualquier asunto'), utiliza el HISTORIAL RECIENTE para combinar los parámetros de la solicitud anterior (fecha y hora inicial) con los nuevos detalles, y extrae un título claro del texto de la nota o asunto dado.\n"
+            "4. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
+            "5. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
+
+        recent_context = ""
+        if user_id and self.memory:
+            hist = self.memory.get_history(user_id)[-6:]
+            if hist:
+                formatted_hist = []
+                for h in hist:
+                    role_name = "Usuario" if h.get("role") == "user" else "Asistente"
+                    formatted_hist.append(f"{role_name}: {h.get('content', '')[:250]}")
+                recent_context = "HISTORIAL RECIENTE DE CONVERSACIÓN:\n" + "\n".join(formatted_hist) + "\n\n"
 
         user_prompt = (
             f"METADATOS DE ORIGEN:\n"
             f"- Tipo de Chat: {chat_type}\n"
             f"- Nombre del Grupo/Canal: {chat_title}\n\n"
-            f"MENSAJE DEL USUARIO:\n\"{user_input}\"\n\n"
+            f"{recent_context}"
+            f"MENSAJE ACTUAL DEL USUARIO:\n\"{user_input}\"\n\n"
             "Devuelve el JSON con la estructura exacta:\n"
             "{\n"
             "  \"has_multiple_goals\": true,\n"
@@ -111,9 +126,9 @@ class GoalOrchestrator:
             "      \"goal_id\": 1,\n"
             "      \"priority\": 1,\n"
             "      \"intent_name\": \"...\",\n"
-            "      \"target_tool\": \"get_calendar_events\",\n"
-            "      \"action_summary\": \"Obtener agenda\",\n"
-            "      \"parameters\": { \"days_ahead\": 30 }\n"
+            "      \"target_tool\": \"create_calendar_event\",\n"
+            "      \"action_summary\": \"Crear evento\",\n"
+            "      \"parameters\": { \"title\": \"Evento de prueba\", \"date_str\": \"Hoy 15:00\", \"duration_minutes\": 15, \"categories\": [\"Personal\"], \"attendees\": [\"reyesrouse1@outlook.com\"], \"description\": \"este es un evento de prueba\" }\n"
             "    }\n"
             "  ]\n"
             "}"
