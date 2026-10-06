@@ -33,6 +33,31 @@ class MCPToolRegistry:
             {
                 "type": "function",
                 "function": {
+                    "name": "complete_outlook_task",
+                    "description": "Marca una o varias tareas pendientes como completadas o eliminadas en Outlook To-Do.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task_query": {"type": "string", "description": "Título de la tarea o número de la lista (ej: 'la quiero creada', '1', 'Revisar precios de Dry-Clean')"}
+                        },
+                        "required": ["task_query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_outlook_tasks",
+                    "description": "Obtiene la lista completa de tareas pendientes detalladas en todas las listas de Outlook To-Do.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "create_calendar_event",
                     "description": "Agenda un evento o reunión en el Calendario de Outlook.",
                     "parameters": {
@@ -102,6 +127,12 @@ class MCPToolRegistry:
                     description=args.get("description", ""),
                     list_name=args.get("list_name")
                 )
+            elif name == "complete_outlook_task":
+                return self.outlook.complete_task(
+                    task_input=args.get("task_query", "")
+                )
+            elif name == "get_outlook_tasks":
+                return self.outlook.get_tasks()
             elif name == "create_calendar_event":
                 return self.outlook.create_event(
                     title=args.get("title", ""),
