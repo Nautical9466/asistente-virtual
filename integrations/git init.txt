@@ -1,0 +1,6 @@
+git init
+git add .
+git commit -m "Initial commit: Virtual Assistant Claudia OS"
+git branch -M main
+git remote add origin https://github.com/Nautical9466/asistente-virtual.git
+git push -u origin main

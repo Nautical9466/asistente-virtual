@@ -38,26 +38,14 @@ class VirtualAssistant:
             self.router = None
 
     def query(self, user_input: str, user_id: str = "default", model: str = "cerebro-groq", system_prompt: str = None) -> str:
-        """Processes a query through LiteLLM across Groq, Gemini, and DeepInfra with fallbacks."""
-        
-        # Pre-check: Execute real Outlook Graph API intent if user input requests an action
-        try:
-            from integrations.outlook import OutlookIntegration
-            from integrations.intent_handler import OutlookIntentParser
-            outlook = OutlookIntegration()
-            parser = OutlookIntentParser(outlook)
-            handled, action_res = parser.parse_and_execute(user_input, "Geral")
-            if handled:
-                self.memory.add_interaction(user_id, user_input, action_res)
-                return action_res
-        except Exception as e:
-            logger.warning(f"[Router] Intent pre-check exception: {e}")
+        """Processes a query through LLMs with MCP Tool execution and multi-provider fallbacks."""
+        from core.mcp_tools import mcp_registry
 
         full_system_prompt = self.context_loader.get_full_system_prompt(system_prompt)
 
-        # Inject real-time Outlook context for task/list analysis queries
+        # Inject real-time Outlook context for task/list/calendar/agenda queries
         low = user_input.lower()
-        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "outlook", "cerrad", "completad", "pendiente", "mover", "analiz"]):
+        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "outlook", "cerrad", "completad", "pendiente", "mover", "analiz", "agenda", "evento", "eventos", "calendario", "semana", "reunion", "reunión"]):
             try:
                 from integrations.outlook import OutlookIntegration
                 outlook_ctx = OutlookIntegration().get_full_context_for_llm()
@@ -72,68 +60,104 @@ class VirtualAssistant:
             messages.append({"role": item["role"], "content": item["content"]})
         messages.append({"role": "user", "content": user_input})
 
-
+        tools_schema = mcp_registry.get_tools_schema()
         assistant_response = None
         import litellm
+        import json
 
-        # 1. Try Router
+        def extract_response(response) -> str:
+            if not response or not response.choices:
+                return None
+            msg = response.choices[0].message
+            # Check for tool call execution
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                tool_results = []
+                for tool_call in msg.tool_calls:
+                    fn_name = tool_call.function.name
+                    try:
+                        fn_args = json.loads(tool_call.function.arguments or "{}")
+                    except Exception:
+                        fn_args = {}
+                    logger.info(f"🛠️ [MCP Tool Call] Invoking tool '{fn_name}' with args {fn_args}")
+                    tool_res = mcp_registry.execute_tool(fn_name, fn_args)
+                    tool_results.append(tool_res)
+                return "\n\n".join(tool_results)
+            return msg.content
+
+        # 1. Try LiteLLM Router
         if self.router:
             try:
                 response = self.router.completion(
                     model=model,
                     messages=messages,
+                    tools=tools_schema,
                     temperature=0.15
                 )
-                assistant_response = response.choices[0].message.content
+                assistant_response = extract_response(response)
             except Exception as e:
-                logger.error(f"[VirtualAssistant] Router error with model {model}: {e}")
+                logger.warning(f"[VirtualAssistant] Router tool completion warning: {e}")
 
         # 2. Try direct Groq completion fallback
         if not assistant_response and os.environ.get("GROQ_API_KEY"):
             try:
                 groq_key = os.environ.get("GROQ_API_KEY")
                 resp = litellm.completion(
-                    model="groq/openai/gpt-oss-20b",
+                    model="groq/llama-3.3-70b-versatile",
                     messages=messages,
+                    tools=tools_schema,
                     api_key=groq_key
                 )
-                assistant_response = resp.choices[0].message.content
+                assistant_response = extract_response(resp)
                 logger.info("✅ Direct Groq completion succeeded.")
             except Exception as e:
-                logger.error(f"[VirtualAssistant] Groq fallback failed: {e}")
+                logger.warning(f"[VirtualAssistant] Groq fallback warning: {e}")
 
         # 3. Try direct Gemini completion fallback
         if not assistant_response and os.environ.get("GEMINI_API_KEY"):
             try:
                 gemini_key = os.environ.get("GEMINI_API_KEY")
                 resp = litellm.completion(
-                    model="gemini/gemini-flash-latest",
+                    model="gemini/gemini-3.8-flash",
+                    messages=messages,
+                    tools=tools_schema,
+                    api_key=gemini_key
+                )
+                assistant_response = extract_response(resp)
+                logger.info("✅ Direct Gemini completion succeeded.")
+            except Exception as e:
+                logger.warning(f"[VirtualAssistant] Gemini fallback warning: {e}")
+
+        # 4. Standard completion without tools if tool completion returned empty
+        if not assistant_response and os.environ.get("GEMINI_API_KEY"):
+            try:
+                gemini_key = os.environ.get("GEMINI_API_KEY")
+                resp = litellm.completion(
+                    model="gemini/gemini-3.8-flash",
                     messages=messages,
                     api_key=gemini_key
                 )
                 assistant_response = resp.choices[0].message.content
-                logger.info("✅ Direct Gemini completion succeeded.")
             except Exception as e:
-                logger.error(f"[VirtualAssistant] Gemini fallback failed: {e}")
+                logger.error(f"[VirtualAssistant] Standard fallback failed: {e}")
 
-        # 4. Local fallback if all API calls failed
+        # 5. Local fallback if all API calls failed
         if not assistant_response:
             assistant_response = self._generate_local_fallback(user_input)
 
-        # Post-check: Clean any pipe tables into cards & execute cleanup if LLM claimed action
         if assistant_response:
-            import re
             assistant_response = clean_markdown_formatting(assistant_response)
-            low_resp = assistant_response.lower()
-            if any(p in low_resp for p in ["he consolidado", "he eliminado", "he borrado"]):
-                try:
-                    from integrations.outlook import OutlookIntegration
-                    OutlookIntegration().delete_duplicate_lists()
-                except Exception as e:
-                    logger.warning(f"[Router] Post-cleanup failed: {e}")
 
         self.memory.add_interaction(user_id, user_input, assistant_response)
         return assistant_response
+
+    def _generate_local_fallback(self, user_input: str) -> str:
+        """Generates structured local response when API key is unconfigured or failing."""
+        return (
+            "🤖 **Modo Asistente Virtual Local**\n\n"
+            f"He recibido tu mensaje: *\"{user_input}\"*\n\n"
+            "💡 *Nota de Conexión*: Las API keys están configuradas en Render, pero los servidores de los proveedores (Groq/Gemini/DeepInfra) no pudieron completar la respuesta.\n"
+            "Verifica que tu `GROQ_API_KEY` (empieza con `gsk_...`) o `GEMINI_API_KEY` (empieza con `AIzaSy...`) estén activas."
+        )
 
 def clean_markdown_formatting(text: str) -> str:
     """Post-processor that converts any Markdown pipe tables (| col | col |) into clean bullet cards."""
@@ -171,15 +195,6 @@ def clean_markdown_formatting(text: str) -> str:
             new_lines.append(line)
 
     return '\n'.join(new_lines)
-
-    def _generate_local_fallback(self, user_input: str) -> str:
-        """Generates structured local response when API key is unconfigured or failing."""
-        return (
-            "🤖 **Modo Asistente Virtual Local**\n\n"
-            f"He recibido tu mensaje: *\"{user_input}\"*\n\n"
-            "💡 *Nota de Conexión*: Las API keys están configuradas en Render, pero los servidores de los proveedores (Groq/Gemini/DeepInfra) no pudieron completar la respuesta.\n"
-            "Verifica que tu `GROQ_API_KEY` (empieza con `gsk_...`) o `GEMINI_API_KEY` (empieza con `AIzaSy...`) estén activas."
-        )
 
 # Global singleton instance
 assistant = VirtualAssistant()

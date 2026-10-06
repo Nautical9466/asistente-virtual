@@ -1,39 +1,22 @@
 import unittest
 import os
 from main import handle_incoming_message
-from skills.skill_router import skill_router
+from core.mcp_tools import mcp_registry
 
 class TestVirtualAssistant(unittest.TestCase):
 
-    def test_tiktok_skill_routing(self):
-        msg = "transcribir video de tiktok sobre python"
-        res = handle_incoming_message(msg, "test_user")
-        self.assertIn("TikTok", res)
+    def test_mcp_tools_schema(self):
+        schema = mcp_registry.get_tools_schema()
+        tool_names = [t["function"]["name"] for t in schema]
+        self.assertIn("create_outlook_task", tool_names)
+        self.assertIn("create_calendar_event", tool_names)
+        self.assertIn("get_calendar_events", tool_names)
 
-    def test_learning_tutor_routing(self):
-        msg = "necesito preparar un ensayo sobre inteligencia artificial"
+    def test_incoming_message_fallback(self):
+        msg = "Hola Claudia, ¿cuáles son tus capacidades?"
         res = handle_incoming_message(msg, "test_user")
-        self.assertIn("Ensayo", res)
-
-    def test_micro_goals_routing(self):
-        msg = "dame 3 micro goals de 15 min para hoy"
-        res = handle_incoming_message(msg, "test_user")
-        self.assertIn("Micro-Objetivos", res)
-
-    def test_linkedin_hunter_routing(self):
-        msg = "buscar empleo de desarrollo en linkedin"
-        res = handle_incoming_message(msg, "test_user")
-        self.assertIn("LinkedIn", res)
-
-    def test_integrations_hub_routing(self):
-        msg = "generar diagrama gantt de clickup"
-        res = handle_incoming_message(msg, "test_user")
-        self.assertIn("Gantt", res)
-
-    def test_claudia_research_routing(self):
-        msg = "investigacion profunda sobre modelos de lenguaje"
-        res = handle_incoming_message(msg, "test_user")
-        self.assertIn("Investigación", res)
+        self.assertIsInstance(res, str)
+        self.assertTrue(len(res) > 0)
 
 if __name__ == "__main__":
     unittest.main()

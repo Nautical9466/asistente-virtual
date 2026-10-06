@@ -21,34 +21,16 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
         from telegram import Update
         from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
         from skills.finance_receipt_manager import FinanceReceiptManager
-        from integrations.outlook import OutlookIntegration
-        from integrations.intent_handler import OutlookIntentParser
 
         receipt_manager = FinanceReceiptManager()
-        outlook = OutlookIntegration()
-        intent_parser = OutlookIntentParser(outlook)
-
-        async def send_delayed_telegram_reminder(bot, chat_id: int, user_name: str, reason: str, delay_sec: int):
-            await asyncio.sleep(delay_sec)
-            msg = (
-                f"⏰ **¡RECORDATORIO PARA {user_name.upper()}!**\n"
-                f"───────────────────────────\n"
-                f"📌 **Recordatorio**: {reason}\n\n"
-                f"¡Es la hora programada! Cuídate mucho. 😊"
-            )
-            try:
-                await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
-            except Exception as e:
-                logger.warning(f"[Telegram] Delayed reminder send failed: {e}")
-                await bot.send_message(chat_id=chat_id, text=f"⏰ ¡RECORDATORIO! Es hora de: {reason}")
 
         async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
-                "👋 **¡Hola! Soy tu Asistente Virtual 24/7.**\n\n"
-                "Puedo ayudarte con:\n"
-                "📅 **Outlook**: Crear Eventos de Calendario, Tareas To-Do o redactar Correos.\n"
-                "🧾 **Finanzas**: Procesar fotos de recibos, analizarlos con IA y guardarlos organizados por carpeta en Google Drive.\n"
-                "📱 **TikTok & Aprendizaje**: Transcribir, agendar metas de 15 min y responder tus dudas."
+                "👋 **¡Hola! Soy Claudia OS, tu Asistente Virtual 24/7.**\n\n"
+                "Puedo ayudarte en lenguaje natural con:\n"
+                "📅 **Outlook & To-Do**: Crear eventos, tareas, ver tu agenda y enviar correos con MCP.\n"
+                "🧾 **Finanzas**: Procesar fotos de recibos, analizarlos con IA y organizarlos.\n"
+                "🧠 **Investigación & Tutoría**: Micro-objetivos, síntesis, redacción y evaluación."
             )
 
         async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,22 +38,9 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
                 return
 
             user_id = str(update.message.from_user.id)
-            user_first_name = update.message.from_user.first_name or os.environ.get("USER_NAME", "Geral")
             user_text = update.message.text
 
-            # 1. Parse natural language intent for Outlook or direct Telegram message reminders
-            handled, response_data = intent_parser.parse_and_execute(user_text, user_first_name)
-
-            if handled and isinstance(response_data, tuple):
-                response, delay_sec, reason = response_data
-                asyncio.create_task(
-                    send_delayed_telegram_reminder(context.bot, update.effective_chat.id, user_first_name, reason, delay_sec)
-                )
-            elif handled:
-                response = response_data
-            else:
-                # 2. Conversational fallback answered by AI LLM (Groq/Gemini)
-                response = message_handler_callback(user_text, user_id)
+            response = message_handler_callback(user_text, user_id)
 
 
 

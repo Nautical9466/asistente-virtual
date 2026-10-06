@@ -617,7 +617,7 @@ class OutlookIntegration:
             return 500, [], str(e)
 
     def get_full_context_for_llm(self) -> str:
-        """Retrieves complete context (all lists, pending tasks, and last 4 completed tasks per list) for LLM analysis."""
+        """Retrieves complete context (all lists, pending tasks, completed tasks, and upcoming calendar events) for LLM analysis."""
         token, err_detail = self._get_access_token_detail()
         if not token:
             return f"(No se pudo conectar a Outlook: {err_detail})"
@@ -627,47 +627,55 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
+        lines = ["### CONTEXTO REAL Y EN VIVO DE MICROSOFT OUTLOOK (EVENTOS Y TAREAS REALES DEL USUARIO):"]
+
+        # 1. Fetch Calendar Events (Next 14 Days)
+        try:
+            now = datetime.now()
+            start_str = now.strftime("%Y-%m-%dT00:00:00Z")
+            end_str = (now + timedelta(days=14)).strftime("%Y-%m-%dT23:59:59Z")
+            cal_url = f"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={start_str}&endDateTime={end_str}&$orderby=start/dateTime&$top=25"
+            cal_res = requests.get(cal_url, headers=headers, timeout=8)
+            events = cal_res.json().get("value", []) if cal_res.status_code == 200 else []
+            
+            lines.append("\n🗓️ **EVENTOS REALES EN OUTLOOK CALENDAR (Próximos 14 días)**:")
+            if not events:
+                lines.append("  - (No hay ningún evento agendado en el calendario de Outlook en los próximos 14 días)")
+            else:
+                for e in events:
+                    subject = e.get("subject", "Sin título").strip()
+                    dt_str = e.get("start", {}).get("dateTime", "")[:16].replace("T", " ")
+                    lines.append(f"  • {subject} [Fecha/Hora: {dt_str}]")
+        except Exception as ce:
+            logger.warning(f"[Outlook Context] Fetch calendar exception: {ce}")
+
+        # 2. Fetch To-Do Lists and Tasks
         lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
         try:
             res = requests.get(lists_url, headers=headers, timeout=10)
-            if res.status_code != 200:
-                return f"(Error al consultar listas de Microsoft Graph: {res.status_code})"
+            if res.status_code == 200:
+                todo_lists = res.json().get("value", [])
+                lines.append("\n📋 **TAREAS REALES EN OUTLOOK TO-DO**:")
 
-            todo_lists = res.json().get("value", [])
-            lines = ["### CONTEXTO REAL Y EN VIVO DE OUTLOOK TO-DO (LISTAS, TAREAS PENDIENTES Y TAREAS CERRADAS DEL USUARIO):"]
+                for l in todo_lists:
+                    lid = l.get("id")
+                    lname = l.get("displayName", "Sin nombre")
 
-            for l in todo_lists:
-                lid = l.get("id")
-                lname = l.get("displayName", "Sin nombre")
+                    # Pending tasks
+                    url_pending = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
+                    p_res = requests.get(url_pending, headers=headers, timeout=8)
+                    p_tasks = p_res.json().get("value", []) if p_res.status_code == 200 else []
 
-                # Pending tasks
-                url_pending = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
-                p_res = requests.get(url_pending, headers=headers, timeout=8)
-                p_tasks = p_res.json().get("value", []) if p_res.status_code == 200 else []
-
-                # Last 4 Completed tasks
-                url_completed = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status eq 'completed'&$top=4"
-                c_res = requests.get(url_completed, headers=headers, timeout=8)
-                c_tasks = c_res.json().get("value", []) if c_res.status_code == 200 else []
-
-                lines.append(f"\n📂 Lista: '{lname}'")
-                lines.append(f"  • Tareas Pendientes ({len(p_tasks)}):")
-                if not p_tasks:
-                    lines.append("    - (Sin tareas pendientes en esta lista)")
-                else:
-                    for t in p_tasks:
-                        title = t.get("title", "Sin título").strip()
-                        due = t.get("dueDateTime", {}).get("dateTime", "")
-                        due_str = f" [Vence: {due[:10]}]" if due else ""
-                        lines.append(f"    - {title}{due_str}")
-
-                lines.append(f"  • Últimas Tareas Cerradas/Completadas ({len(c_tasks)}):")
-                if not c_tasks:
-                    lines.append("    - (Sin tareas completadas recientemente en esta lista)")
-                else:
-                    for t in c_tasks:
-                        title = t.get("title", "Sin título").strip()
-                        lines.append(f"    - {title}")
+                    lines.append(f"\n  📂 Lista: '{lname}'")
+                    lines.append(f"    • Tareas Pendientes ({len(p_tasks)}):")
+                    if not p_tasks:
+                        lines.append("      - (Sin tareas pendientes en esta lista)")
+                    else:
+                        for t in p_tasks:
+                            title = t.get("title", "Sin título").strip()
+                            due = t.get("dueDateTime", {}).get("dateTime", "")
+                            due_str = f" [Vence: {due[:10]}]" if due else ""
+                            lines.append(f"      - {title}{due_str}")
 
             return "\n".join(lines)
         except Exception as e:

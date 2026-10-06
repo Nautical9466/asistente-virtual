@@ -6,7 +6,6 @@ from flask import Flask, request, jsonify, redirect, url_for
 from dotenv import load_dotenv
 
 from core.router import assistant
-from skills.skill_router import skill_router
 from integrations.telegram import setup_telegram_bot
 from integrations.twilio_whatsapp import process_whatsapp_request
 
@@ -31,10 +30,6 @@ def get_outlook_client_id() -> str:
 def handle_incoming_message(user_input: str, user_id: str = "default") -> str:
     """Central processing logic for messages from Telegram, WhatsApp, or Web."""
     try:
-        skill_response = skill_router.execute(user_input, user_id)
-        if skill_response:
-            return skill_response
-
         return assistant.query(user_input, user_id)
     except Exception as e:
         logger.error(f"Error processing message for user {user_id}: {e}")
