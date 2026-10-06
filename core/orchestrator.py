@@ -9,7 +9,7 @@ from core.context_loader import ContextLoader
 logger = logging.getLogger("Orchestrator")
 
 class GoalOrchestrator:
-    """Multi-Goal Orchestrator & Task Planner for Claudia OS (N8N-style execution pipeline)."""
+    """Multi-Goal Orchestrator & Natural Language Task Planner for Claudia OS (N8N-style execution pipeline)."""
 
     def __init__(self):
         self.context_loader = ContextLoader()
@@ -17,9 +17,9 @@ class GoalOrchestrator:
     def process_request(self, user_input: str, user_id: str = "default", origin_metadata: Optional[Dict[str, Any]] = None) -> str:
         """Central pipeline:
         1. Context & Metadata Parser
-        2. Classifier LLM (Extract goals, tool mappings, parameters, priority)
+        2. LLM Goal Classifier (Pure LLM natural language intent extraction)
         3. Orchestrated MCP Tool Execution Loop
-        4. Evaluator & Closing Summarizer LLM
+        4. Evaluator & Closing Summarizer
         """
         if origin_metadata is None:
             origin_metadata = {}
@@ -27,7 +27,7 @@ class GoalOrchestrator:
         chat_type = origin_metadata.get("chat_type", "private")
         chat_title = origin_metadata.get("chat_title", "Chat Directo")
 
-        # 1. Classify & Decompose Request into Structured Goals
+        # 1. Classify & Decompose Request into Structured Goals via LLM Reasoning
         classification = self._classify_and_decompose(user_input, chat_type, chat_title)
 
         goals = classification.get("goals", [])
@@ -37,7 +37,7 @@ class GoalOrchestrator:
                 "priority": 1,
                 "intent_name": "general_query",
                 "target_tool": "general_query",
-                "action_summary": "Responder consulta general",
+                "action_summary": "Responder consulta conversacional general",
                 "parameters": {"query": user_input}
             }]
 
@@ -74,27 +74,26 @@ class GoalOrchestrator:
         return final_response
 
     def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str) -> Dict[str, Any]:
-        """Node 1: Uses LLM to decompose input into structured goals JSON."""
+        """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
         system_prompt = (
-            "Eres el Orquestador Inteligente y Clasificador de Metas de Claudia OS.\n"
-            "Tu único trabajo es analizar el mensaje del usuario y sus metadatos de origen (chat privado, grupo o canal) "
-            "y devolver un JSON ESTRUCTURADO con las metas/solicitudes identificadas, ordenadas por prioridad de ejecución.\n\n"
+            "Eres el Orquestador Inteligente y Analista de Lenguaje Natural de Claudia OS / Jarvis.\n"
+            "Tu tarea es analizar la intención del usuario entendiendo su lenguaje natural (incluso con modismos, frases casuales o peticiones múltiples) "
+            "y mapearla a las herramientas MCP adecuadas en un JSON ESTRUCTURADO.\n\n"
             "HERRAMIENTAS MCP DISPONIBLES:\n"
-            "- get_calendar_events (días a consultar, default 14 o 30)\n"
+            "- get_calendar_events (para consultar la agenda, eventos programados, citas, fechas del mes/semana)\n"
             "- create_calendar_event (title, time_str, duration_minutes, description)\n"
-            "- get_outlook_tasks (obtiene todas las tareas pendientes agrupadas por lista)\n"
+            "- get_outlook_tasks (para consultar pendientes, tareas activas, listas de tareas, compromisos)\n"
             "- create_outlook_task (title, description, list_name)\n"
             "- complete_outlook_task (task_query, list_name_or_number)\n"
             "- delete_outlook_task (task_query, list_name_or_number)\n"
             "- move_outlook_task (task_query, destination_list_name, src_list_name_or_number)\n"
             "- manage_todo_lists (action: create/delete/consolidate_duplicates, list_name)\n"
             "- send_email (recipient, subject, body_content)\n"
-            "- general_query (para saludos, responder preguntas, conversar, investigar o redactar textos)\n\n"
-            "REGLAS ESTRUCTURALES:\n"
-            "1. Si el mensaje es un saludo simple (ej: 'hola', 'buenas'), asigna target_tool: general_query.\n"
-            "2. Si el usuario pide varias cosas en un mismo mensaje (ej: 'dame la agenda y borra la tarea 2 de la lista 1'), DEBES crear un objeto independiente en la lista 'goals' para CADA SOLICITUD.\n"
-            "3. Asigna 'priority': 1 al objetivo más urgente/primario, 'priority': 2 al siguiente, etc.\n"
-            "4. Responde ÚNICAMENTE en formato JSON plano válido con la clave principal 'goals'."
+            "- general_query (para saludos simples como 'hola', preguntas generales, investigación o conversación habitual)\n\n"
+            "REGLAS DE CLASIFICACIÓN LINGÜÍSTICA:\n"
+            "1. Si el usuario realiza un saludo simple o conversación general (ej: 'hola', 'buenos días', 'quién eres'), asigna target_tool: general_query.\n"
+            "2. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
+            "3. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
 
         user_prompt = (
@@ -133,21 +132,7 @@ class GoalOrchestrator:
                 pass
             return None
 
-        from core.router import assistant
-        if assistant.router:
-            try:
-                resp = assistant.router.completion(
-                    model="cerebro-groq",
-                    messages=messages,
-                    response_format={"type": "json_object"}
-                )
-                if resp and resp.choices and resp.choices[0].message.content:
-                    parsed = _valid_json(resp.choices[0].message.content)
-                    if parsed:
-                        return parsed
-            except Exception as e:
-                logger.warning(f"[Orchestrator Classifier Router Warning]: {e}")
-
+        # 1. Try DeepInfra FIRST (unlimited capacity, high speed Llama-3.3 70B)
         if os.environ.get("DEEPINFRA_API_KEY"):
             try:
                 resp = litellm.completion(
@@ -163,6 +148,7 @@ class GoalOrchestrator:
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier DeepInfra Warning]: {e}")
 
+        # 2. Try Groq
         if os.environ.get("GROQ_API_KEY"):
             try:
                 resp = litellm.completion(
@@ -178,6 +164,7 @@ class GoalOrchestrator:
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier Groq Warning]: {e}")
 
+        # 3. Try Gemini
         if os.environ.get("GEMINI_API_KEY"):
             try:
                 resp = litellm.completion(
@@ -193,71 +180,18 @@ class GoalOrchestrator:
             except Exception as ex:
                 logger.warning(f"[Orchestrator Classifier Gemini Warning]: {ex}")
 
-        return self._fallback_heuristic_classifier(user_input)
-
-    def _fallback_heuristic_classifier(self, user_input: str) -> Dict[str, Any]:
-        """Heuristic fallback when JSON LLM classification is unavailable."""
-        low = user_input.lower()
-        goals = []
-        gid = 1
-
-        # Calendar/Agenda check
-        if any(w in low for w in ["agenda", "calendario", "evento", "eventos", "reunión", "reunion"]):
-            goals.append({
-                "goal_id": gid,
-                "priority": gid,
-                "intent_name": "consultar_agenda",
-                "target_tool": "get_calendar_events",
-                "action_summary": "Consultar eventos del calendario",
-                "parameters": {"days_ahead": 30}
-            })
-            gid += 1
-
-        # Tasks/To-Do check
-        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "pendiente", "pendientes"]):
-            if any(w in low for w in ["elimin", "borra"]):
-                goals.append({
-                    "goal_id": gid,
-                    "priority": gid,
-                    "intent_name": "eliminar_tarea",
-                    "target_tool": "delete_outlook_task",
-                    "action_summary": "Eliminar tareas en Outlook To-Do",
-                    "parameters": {"task_query": user_input}
-                })
-            elif any(w in low for w in ["complet", "cerr", "hech"]):
-                goals.append({
-                    "goal_id": gid,
-                    "priority": gid,
-                    "intent_name": "completar_tarea",
-                    "target_tool": "complete_outlook_task",
-                    "action_summary": "Completar tareas en Outlook To-Do",
-                    "parameters": {"task_query": user_input}
-                })
-            else:
-                goals.append({
-                    "goal_id": gid,
-                    "priority": gid,
-                    "intent_name": "consultar_tareas",
-                    "target_tool": "get_outlook_tasks",
-                    "action_summary": "Consultar todas las tareas por lista",
-                    "parameters": {}
-                })
-            gid += 1
-
-        if not goals:
-            goals.append({
+        # 4. Fallback default goal if all API classification calls failed
+        return {
+            "has_multiple_goals": False,
+            "total_goals": 1,
+            "goals": [{
                 "goal_id": 1,
                 "priority": 1,
-                "intent_name": "consulta_general",
+                "intent_name": "general_query",
                 "target_tool": "general_query",
-                "action_summary": "Responder consulta general",
+                "action_summary": "Responder consulta conversacional",
                 "parameters": {"query": user_input}
-            })
-
-        return {
-            "has_multiple_goals": len(goals) > 1,
-            "total_goals": len(goals),
-            "goals": goals
+            }]
         }
 
     def _execute_general_query(self, query: str, user_id: str) -> str:
@@ -277,14 +211,13 @@ class GoalOrchestrator:
 
         combined_text = "\n\n".join(formatted_outputs)
 
-        # Do NOT append completion badge for plain general queries/greetings
         if not is_only_general:
             if total_goals == 1:
-                closing_phrase = "\n\n✨ *Se ha completado la tarea solicitada.*"
+                closing_phrase = "\n\n✨ *Se ha completado la tarea solicitada, Señor.*"
             elif total_goals == 2:
-                closing_phrase = "\n\n✨ *Se han completado las dos tareas solicitadas.*"
+                closing_phrase = "\n\n✨ *Se han completado las dos tareas solicitadas, Señor.*"
             else:
-                closing_phrase = f"\n\n✨ *Se han completado las {total_goals} tareas solicitadas.*"
+                closing_phrase = f"\n\n✨ *Se han completado las {total_goals} tareas solicitadas, Señor.*"
             combined_text += closing_phrase
 
         from core.router import clean_markdown_formatting
