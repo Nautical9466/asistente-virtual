@@ -92,8 +92,9 @@ class GoalOrchestrator:
             "- general_query (para saludos simples como 'hola', preguntas generales, investigación o conversación habitual)\n\n"
             "REGLAS DE CLASIFICACIÓN LINGÜÍSTICA:\n"
             "1. Si el usuario realiza un saludo simple o conversación general (ej: 'hola', 'buenos días', 'quién eres'), asigna target_tool: general_query.\n"
-            "2. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
-            "3. Responde ÚNICAMENTE con un JSON plano estructurado válido."
+            "2. Si el usuario pide crear un evento en el calendario pero NO especifica explícitamente el título/asunto exacto en su mensaje (ej: 'Quiero que crees un evento para hoy a las 4 pm'), NUNCA inventes o asumas títulos como 'Evento del dia' o 'Nuevo evento'. DEBES asignar title: \"\" en los parámetros de create_calendar_event para que el sistema solicite interactivamente la información completa.\n"
+            "3. Si el mensaje contiene múltiples intenciones (ej: pedir la agenda Y pedir las tareas pendientes), DEBES crear un elemento independiente en 'goals' para CADA INTENCIÓN.\n"
+            "4. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
 
         user_prompt = (
