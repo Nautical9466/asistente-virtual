@@ -212,12 +212,13 @@ class GoalOrchestrator:
         combined_text = "\n\n".join(formatted_outputs)
 
         if not is_only_general:
+            user_name = os.environ.get("USER_NAME", "Geral")
             if total_goals == 1:
-                closing_phrase = "\n\n✨ *Se ha completado la tarea solicitada, Señor.*"
+                closing_phrase = f"\n\n🤖 *Se ha completado la tarea solicitada, {user_name}.*"
             elif total_goals == 2:
-                closing_phrase = "\n\n✨ *Se han completado las dos tareas solicitadas, Señor.*"
+                closing_phrase = f"\n\n🤖 *Se han completado las dos tareas solicitadas, {user_name}.*"
             else:
-                closing_phrase = f"\n\n✨ *Se han completado las {total_goals} tareas solicitadas, Señor.*"
+                closing_phrase = f"\n\n🤖 *Se han completado las {total_goals} tareas solicitadas, {user_name}.*"
             combined_text += closing_phrase
 
         from core.router import clean_markdown_formatting
