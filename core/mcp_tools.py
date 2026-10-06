@@ -33,14 +33,46 @@ class MCPToolRegistry:
             {
                 "type": "function",
                 "function": {
-                    "name": "complete_outlook_task",
-                    "description": "Marca una o varias tareas pendientes como completadas o eliminadas en Outlook To-Do.",
+                    "name": "delete_outlook_task",
+                    "description": "Elimina permanentemente una o varias tareas de Outlook To-Do por título o por número de tarea y número de lista (ej: tareas 1 y 2 de la lista 1).",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "task_query": {"type": "string", "description": "Título de la tarea o número de la lista (ej: 'la quiero creada', '1', 'Revisar precios de Dry-Clean')"}
+                            "task_query": {"type": "string", "description": "Título de la tarea o números de tarea (ej: '1 y 2', 'la quiero creada', '7 8 9')"},
+                            "list_name_or_number": {"type": "string", "description": "Nombre de la lista o número de la lista (ej: '1', 'Tareas', '8', 'Gorditas')"}
                         },
                         "required": ["task_query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "complete_outlook_task",
+                    "description": "Marca una o varias tareas pendientes como completadas en Outlook To-Do por título o por número de tarea y lista.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task_query": {"type": "string", "description": "Título de la tarea o números (ej: '1', 'Revisar precios')"},
+                            "list_name_or_number": {"type": "string", "description": "Nombre o número de la lista (ej: '1', 'Tareas')"}
+                        },
+                        "required": ["task_query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "move_outlook_task",
+                    "description": "Mueve una o varias tareas a otra lista en Outlook To-Do.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task_query": {"type": "string", "description": "Título de la tarea o número (ej: '3' o 'Revisar precios de Dry-Clean')"},
+                            "destination_list_name": {"type": "string", "description": "Nombre de la lista destino (ej: 'Tareas por la noche')"},
+                            "src_list_name_or_number": {"type": "string", "description": "Nombre o número de la lista origen"}
+                        },
+                        "required": ["task_query", "destination_list_name"]
                     }
                 }
             },
@@ -127,9 +159,20 @@ class MCPToolRegistry:
                     description=args.get("description", ""),
                     list_name=args.get("list_name")
                 )
+            elif name == "delete_outlook_task":
+                return self.outlook.delete_task(
+                    task_input=args.get("task_query", ""),
+                    list_name_or_number=args.get("list_name_or_number")
+                )
             elif name == "complete_outlook_task":
                 return self.outlook.complete_task(
-                    task_input=args.get("task_query", "")
+                    task_input=args.get("task_query", ""),
+                    list_name_or_number=args.get("list_name_or_number")
+                )
+            elif name == "move_outlook_task":
+                return self.outlook.move_task(
+                    task_input=args.get("task_query", ""),
+                    destination_list_name=args.get("destination_list_name", "")
                 )
             elif name == "get_outlook_tasks":
                 return self.outlook.get_tasks()

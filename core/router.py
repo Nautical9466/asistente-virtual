@@ -160,8 +160,8 @@ class VirtualAssistant:
         )
 
 def clean_markdown_formatting(text: str) -> str:
-    """Post-processor that converts any Markdown pipe tables (| col | col |) into clean bullet cards."""
-    if not text or '|' not in text:
+    """Post-processor that cleans Telegram-incompatible Markdown (headings #, pipe tables)."""
+    if not text:
         return text
 
     import re
@@ -172,6 +172,13 @@ def clean_markdown_formatting(text: str) -> str:
 
     for line in lines:
         stripped = line.strip()
+        # 1. Clean Markdown headings (# ## ### ####) into bold text for Telegram
+        if stripped.startswith('#'):
+            h_clean = re.sub(r'^#+\s*', '', stripped).strip()
+            new_lines.append(f"📌 **{h_clean}**")
+            continue
+
+        # 2. Clean pipe tables (| col | col |)
         if stripped.startswith('|') and stripped.endswith('|'):
             if re.match(r'^\|[\s:\-|\-]+\|$', stripped):
                 in_table = True

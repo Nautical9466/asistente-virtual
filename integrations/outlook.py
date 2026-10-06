@@ -910,7 +910,7 @@ class OutlookIntegration:
             ]
 
             total_all_tasks = 0
-            for l in todo_lists:
+            for l_idx, l in enumerate(todo_lists, start=1):
                 lid = l.get("id")
                 lname = l.get("displayName", "Sin nombre")
 
@@ -919,19 +919,18 @@ class OutlookIntegration:
                 tasks = t_res.json().get("value", []) if t_res.status_code == 200 else []
                 total_all_tasks += len(tasks)
 
-                output_lines.append(f"📂 **Lista: {lname}** (`{len(tasks)} pendientes`)")
+                output_lines.append(f"📂 **Lista {l_idx}: {lname}** (`{len(tasks)} pendientes`)")
                 if not tasks:
-                    output_lines.append("   └─ _(Sin tareas pendientes en esta lista)_\n")
+                    output_lines.append("   └─ *(Sin tareas pendientes en esta lista)*\n")
                 else:
-                    for t in tasks:
+                    for t_idx, t in enumerate(tasks, start=1):
                         title = t.get("title", "Sin título").strip()
-                        output_lines.append(f"   ▫️ {title}")
+                        output_lines.append(f"   {l_idx}.{t_idx} {title}")
                     output_lines.append("")
 
             output_lines.append("───────────────────────────")
             output_lines.append(f"💡 *Total de Listas*: `{len(todo_lists)}` | *Total Pendientes*: `{total_all_tasks}`")
-            output_lines.append("\n➕ **¿Puedo crear una lista nueva?**")
-            output_lines.append("¡Sí! Para crear una lista nueva, solo escríbeme:\n`crear lista: Nombre De Tu Lista`\n\n*Detalles necesarios*: Únicamente necesitas darme el nombre deseado para la nueva lista.")
+            output_lines.append("\n💡 *Tip para gestionar rápidamente:* Puedes decirme: *\"Elimina las tareas 1 y 2 de la lista 1\"* o *\"Mueve la tarea 3 de la lista 1 a la lista 2\"*.")
 
             return "\n".join(output_lines)
         except Exception as e:
@@ -1289,7 +1288,104 @@ class OutlookIntegration:
         lines.append("🎉 ¡Sincronizado con Microsoft Outlook!")
         return "\n".join(lines)
 
-    def complete_task(self, task_input: str) -> str:
+    def delete_task(self, task_input: str, list_name_or_number: str = None) -> str:
+        """Permanently deletes one or more tasks in Outlook To-Do via Microsoft Graph API."""
+        token, err_detail = self._get_access_token_detail()
+        if not token:
+            return f"❌ No se pudo conectar a Outlook To-Do:\n{err_detail}"
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        import re
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas ({l_res.status_code}): {l_res.text}"
+
+        todo_lists = l_res.json().get("value", [])
+
+        # 1. Filter by specific list if provided
+        target_list = None
+        if list_name_or_number is not None and str(list_name_or_number).strip():
+            clean_lname = str(list_name_or_number).strip().lower()
+            if clean_lname.isdigit():
+                l_idx = int(clean_lname) - 1
+                if 0 <= l_idx < len(todo_lists):
+                    target_list = todo_lists[l_idx]
+            if not target_list:
+                for l in todo_lists:
+                    if clean_lname in l.get("displayName", "").lower():
+                        target_list = l
+                        break
+
+        # 2. Fetch tasks in target list or across all lists
+        target_tasks = []
+        if target_list:
+            lid = target_list.get("id")
+            lname = target_list.get("displayName")
+            url_t = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=100"
+            t_res = requests.get(url_t, headers=headers, timeout=10)
+            tasks_in_list = t_res.json().get("value", []) if t_res.status_code == 200 else []
+            for t in tasks_in_list:
+                t["_list_id"] = lid
+                t["_list_name"] = lname
+                target_tasks.append(t)
+        else:
+            status_code, target_tasks, err_msg = self._fetch_all_outlook_tasks(headers)
+            if status_code != 200:
+                return f"❌ Error al consultar las tareas de Outlook ({status_code}): {err_msg}"
+
+        if not target_tasks:
+            return "ℹ️ No se encontraron tareas pendientes."
+
+        # Parse task numbers or title matches
+        numbers = [int(n) for n in re.findall(r'\b\d+\b', task_input)]
+        matched_tasks = []
+
+        if numbers:
+            for num in numbers:
+                if 1 <= num <= len(target_tasks):
+                    matched_tasks.append(target_tasks[num - 1])
+        else:
+            clean_input = task_input.lower().strip()
+            for t in target_tasks:
+                if clean_input in t.get("title", "").lower():
+                    matched_tasks.append(t)
+
+        if not matched_tasks:
+            return f"⚠️ No encontré ninguna tarea pendiente que coincida con `{task_input}`."
+
+        deleted_titles = []
+        failed_titles = []
+
+        for t in matched_tasks:
+            tid = t.get("id")
+            lid = t.get("_list_id")
+            title = t.get("title", "Sin título")
+            del_url = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks/{tid}"
+            del_res = requests.delete(del_url, headers=headers)
+            if del_res.status_code in [200, 204]:
+                deleted_titles.append(title)
+            else:
+                failed_titles.append(title)
+
+        lines = ["🗑️ **TAREAS ELIMINADAS EN OUTLOOK TO-DO**", "───────────────────────────\n"]
+        for title in deleted_titles:
+            lines.append(f"❌ ~{title}~\n")
+
+        if failed_titles:
+            lines.append("\n⚠️ **No se pudieron eliminar:**")
+            for title in failed_titles:
+                lines.append(f"• {title}\n")
+
+        lines.append("───────────────────────────")
+        lines.append(f"🎉 Total de tareas eliminadas permanentemente: `{len(deleted_titles)}`")
+        return "\n".join(lines)
+
+    def complete_task(self, task_input: str, list_name_or_number: str = None) -> str:
         """Marks one or more tasks as completed in Outlook To-Do via Microsoft Graph API."""
         token, err_detail = self._get_access_token_detail()
         if not token:
@@ -1300,24 +1396,55 @@ class OutlookIntegration:
             "Content-Type": "application/json"
         }
 
-        status_code, tasks, err_msg = self._fetch_all_outlook_tasks(headers)
-        if status_code != 200:
-            return f"❌ Error al consultar las tareas de Outlook ({status_code}): {err_msg}"
+        import re
+        lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
+        l_res = requests.get(lists_url, headers=headers, timeout=10)
+        if l_res.status_code != 200:
+            return f"❌ Error al consultar listas: {l_res.text}"
 
-        if not tasks:
+        todo_lists = l_res.json().get("value", [])
+
+        target_list = None
+        if list_name_or_number is not None and str(list_name_or_number).strip():
+            clean_lname = str(list_name_or_number).strip().lower()
+            if clean_lname.isdigit():
+                l_idx = int(clean_lname) - 1
+                if 0 <= l_idx < len(todo_lists):
+                    target_list = todo_lists[l_idx]
+            if not target_list:
+                for l in todo_lists:
+                    if clean_lname in l.get("displayName", "").lower():
+                        target_list = l
+                        break
+
+        target_tasks = []
+        if target_list:
+            lid = target_list.get("id")
+            lname = target_list.get("displayName")
+            url_t = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=100"
+            t_res = requests.get(url_t, headers=headers, timeout=10)
+            tasks_in_list = t_res.json().get("value", []) if t_res.status_code == 200 else []
+            for t in tasks_in_list:
+                t["_list_id"] = lid
+                t["_list_name"] = lname
+                target_tasks.append(t)
+        else:
+            status_code, target_tasks, err_msg = self._fetch_all_outlook_tasks(headers)
+            if status_code != 200:
+                return f"❌ Error al consultar las tareas de Outlook ({status_code}): {err_msg}"
+
+        if not target_tasks:
             return "ℹ️ No hay tareas pendientes para completar."
 
-        import re
         numbers = [int(n) for n in re.findall(r'\b\d+\b', task_input)]
-
         targets = []
         if numbers:
             for num in numbers:
-                if 1 <= num <= len(tasks):
-                    targets.append(tasks[num - 1])
+                if 1 <= num <= len(target_tasks):
+                    targets.append(target_tasks[num - 1])
         else:
             clean_input = task_input.lower().strip()
-            for t in tasks:
+            for t in target_tasks:
                 if clean_input in t.get("title", "").lower():
                     targets.append(t)
 
@@ -1340,7 +1467,7 @@ class OutlookIntegration:
 
         lines = ["✅ **TAREAS MARCADAS COMO COMPLETADAS EN OUTLOOK**", "───────────────────────────\n"]
         for title in completed_titles:
-            lines.append(f"✔️ **{title}**\n")
+            lines.append(f"✔️ ~{title}~\n")
 
         if failed_titles:
             lines.append("\n❌ **No se pudieron completar:**")
