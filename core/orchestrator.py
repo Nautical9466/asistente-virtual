@@ -131,22 +131,25 @@ class GoalOrchestrator:
                     messages=messages,
                     response_format={"type": "json_object"}
                 )
-                content = resp.choices[0].message.content
-                return json.loads(content)
+                if resp and resp.choices and resp.choices[0].message.content:
+                    return json.loads(resp.choices[0].message.content)
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier Router Warning]: {e}")
 
-        try:
-            resp = litellm.completion(
-                model="groq/openai/gpt-oss-20b",
-                messages=messages,
-                api_key=os.environ.get("GROQ_API_KEY"),
-                response_format={"type": "json_object"}
-            )
-            content = resp.choices[0].message.content
-            return json.loads(content)
-        except Exception as e:
-            logger.warning(f"[Orchestrator Classifier Fallback] Groq JSON failed: {e}. Trying Gemini...")
+        if os.environ.get("GROQ_API_KEY"):
+            try:
+                resp = litellm.completion(
+                    model="groq/openai/gpt-oss-20b",
+                    messages=messages,
+                    api_key=os.environ.get("GROQ_API_KEY"),
+                    response_format={"type": "json_object"}
+                )
+                if resp and resp.choices and resp.choices[0].message.content:
+                    return json.loads(resp.choices[0].message.content)
+            except Exception as e:
+                logger.warning(f"[Orchestrator Classifier Groq Warning]: {e}")
+
+        if os.environ.get("GEMINI_API_KEY"):
             try:
                 resp = litellm.completion(
                     model="gemini/gemini-3.8-flash",
@@ -154,11 +157,12 @@ class GoalOrchestrator:
                     api_key=os.environ.get("GEMINI_API_KEY"),
                     response_format={"type": "json_object"}
                 )
-                content = resp.choices[0].message.content
-                return json.loads(content)
+                if resp and resp.choices and resp.choices[0].message.content:
+                    return json.loads(resp.choices[0].message.content)
             except Exception as ex:
-                logger.error(f"[Orchestrator Classifier Error]: {ex}")
-                return self._fallback_heuristic_classifier(user_input)
+                logger.warning(f"[Orchestrator Classifier Gemini Warning]: {ex}")
+
+        return self._fallback_heuristic_classifier(user_input)
 
     def _fallback_heuristic_classifier(self, user_input: str) -> Dict[str, Any]:
         """Heuristic fallback when JSON LLM classification is unavailable."""

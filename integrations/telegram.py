@@ -50,14 +50,17 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             }
 
             response = message_handler_callback(user_text, user_id, origin_metadata)
-
-
+            if not response or not str(response).strip():
+                response = "⚠️ No se obtuvo respuesta para esta consulta."
 
             try:
                 await update.message.reply_text(response, parse_mode="Markdown")
             except Exception as e:
                 logger.warning(f"[Telegram] Markdown send failed ({e}), sending plain text fallback.")
-                await update.message.reply_text(response)
+                try:
+                    await update.message.reply_text(response)
+                except Exception as e2:
+                    logger.error(f"[Telegram] Plain text send failed too: {e2}")
 
 
         async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
