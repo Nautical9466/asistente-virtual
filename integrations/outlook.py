@@ -482,30 +482,31 @@ class OutlookIntegration:
             return f"❌ Error al consultar eventos repetitivos en Outlook: {e}"
 
     def _fetch_all_outlook_tasks(self, headers: dict) -> tuple:
-        """Fetches pending tasks across ALL Outlook To-Do lists (Tareas, Repetitivos, Casa, etc.)."""
+        """Fetches pending tasks across ALL Outlook To-Do lists in parallel via ThreadPoolExecutor."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
         try:
-            res = requests.get(lists_url, headers=headers, timeout=10)
+            res = requests.get(lists_url, headers=headers, timeout=8)
             if res.status_code != 200:
                 return self._fetch_outlook_tasks(headers, top=50)
 
             todo_lists = res.json().get("value", [])
             all_tasks = []
 
-            for l in todo_lists:
+            def fetch_single_list(l):
                 lid = l.get("id")
                 lname = l.get("displayName", "Tareas")
-
                 url_expand = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$expand=checklistItems&$top=50"
                 url_simple = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
 
                 tasks_in_list = []
                 try:
-                    t_res = requests.get(url_expand, headers=headers, timeout=8)
+                    t_res = requests.get(url_expand, headers=headers, timeout=5)
                     if t_res.status_code == 200:
                         tasks_in_list = t_res.json().get("value", [])
                     else:
-                        t_res2 = requests.get(url_simple, headers=headers, timeout=8)
+                        t_res2 = requests.get(url_simple, headers=headers, timeout=5)
                         if t_res2.status_code == 200:
                             tasks_in_list = t_res2.json().get("value", [])
                 except Exception as e:
@@ -514,7 +515,17 @@ class OutlookIntegration:
                 for t in tasks_in_list:
                     t["_list_name"] = lname
                     t["_list_id"] = lid
-                    all_tasks.append(t)
+                return tasks_in_list
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(fetch_single_list, l) for l in todo_lists]
+                for future in as_completed(futures):
+                    try:
+                        tasks = future.result()
+                        if tasks:
+                            all_tasks.extend(tasks)
+                    except Exception as ex:
+                        logger.warning(f"[Outlook Parallel Task Fetch Warning]: {ex}")
 
             return 200, all_tasks, ""
 
