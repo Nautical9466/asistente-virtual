@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 telegram_app = None
 
 async def send_telegram_chunked_message(update, text: str):
-    """Splits long responses into Telegram-friendly chunks (max 3800 chars) and sends them sequentially."""
+    """Splits long response text into Telegram-friendly chunks (max 3800 chars) and sends them sequentially."""
     if not text or not str(text).strip():
         return
 
@@ -46,6 +46,19 @@ async def send_telegram_chunked_message(update, text: str):
                 await update.message.reply_text(chunk_text, parse_mode="Markdown")
             except Exception:
                 await update.message.reply_text(chunk_text)
+
+async def send_telegram_topic_messages(update, response: str):
+    """Sends each goal/topic in its OWN dedicated Telegram message.
+    If a single topic exceeds 3800 chars, chunk it. Never mix different topics into the same Telegram message."""
+    if not response or not str(response).strip():
+        return
+
+    topics = response.split("\n\n---TOPIC_BREAK---\n\n")
+    for topic in topics:
+        topic_text = topic.strip()
+        if not topic_text:
+            continue
+        await send_telegram_chunked_message(update, topic_text)
 
 def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> bool:
     """Configures Telegram Bot with photo receipt processing, smart AI intent routing, and Outlook integrations."""
@@ -92,7 +105,7 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             if not response or not str(response).strip():
                 response = "⚠️ No se obtuvo respuesta para esta consulta."
 
-            await send_telegram_chunked_message(update, response)
+            await send_telegram_topic_messages(update, response)
 
 
         async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

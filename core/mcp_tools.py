@@ -175,7 +175,11 @@ class MCPToolRegistry:
                     destination_list_name=args.get("destination_list_name", "")
                 )
             elif name == "get_outlook_tasks":
-                return self.outlook.get_tasks()
+                include_details = args.get("include_details", False)
+                if include_details:
+                    return self.outlook.get_tasks()
+                else:
+                    return self.outlook.get_all_lists_grouped()
             elif name == "create_calendar_event":
                 return self.outlook.create_event(
                     title=args.get("title", ""),

@@ -201,28 +201,27 @@ class GoalOrchestrator:
 
     def _evaluate_and_summarize(self, user_input: str, execution_results: List[Dict[str, Any]], chat_type: str, chat_title: str, total_goals: int) -> str:
         """Node 3: Evaluates completion of all goals and formats Telegram output."""
+        from core.router import clean_markdown_formatting
         formatted_outputs = []
         is_only_general = (total_goals == 1 and execution_results[0].get("tool_name") == "general_query")
 
         for item in execution_results:
             res = item.get("result", "").strip()
             if res:
-                formatted_outputs.append(res)
-
-        combined_text = "\n\n".join(formatted_outputs)
+                cleaned_res = clean_markdown_formatting(res)
+                formatted_outputs.append(cleaned_res)
 
         if not is_only_general:
             user_name = os.environ.get("USER_NAME", "Geral")
             if total_goals == 1:
-                closing_phrase = f"\n\n🤖 *Se ha completado la tarea solicitada, {user_name}.*"
+                closing_phrase = f"🤖 *Se ha completado la tarea solicitada, {user_name}.*"
             elif total_goals == 2:
-                closing_phrase = f"\n\n🤖 *Se han completado las dos tareas solicitadas, {user_name}.*"
+                closing_phrase = f"🤖 *Se han completado las dos tareas solicitadas, {user_name}.*"
             else:
-                closing_phrase = f"\n\n🤖 *Se han completado las {total_goals} tareas solicitadas, {user_name}.*"
-            combined_text += closing_phrase
+                closing_phrase = f"🤖 *Se han completado las {total_goals} tareas solicitadas, {user_name}.*"
+            formatted_outputs.append(closing_phrase)
 
-        from core.router import clean_markdown_formatting
-        final_text = clean_markdown_formatting(combined_text)
+        final_text = "\n\n---TOPIC_BREAK---\n\n".join(formatted_outputs)
         return final_text
 
 orchestrator = GoalOrchestrator()
