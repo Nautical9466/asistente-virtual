@@ -113,47 +113,77 @@ class OutlookIntegration:
         }
 
         import re
+        now = datetime.now()
+        clean_date = (date_str or "").lower().strip()
+        clean_title = (title or "").strip()
+
+        # If title is missing, empty, or a generic placeholder, ask the user interactively
+        trivial_titles = ["", "evento", "un evento", "nuevo evento", "reunion", "reunión", "crear evento", "agendar evento"]
+        if clean_title.lower() in trivial_titles:
+            return (
+                "📋 **INFORMACIÓN PARA CREAR TU EVENTO EN OUTLOOK**\n"
+                "───────────────────────────\n\n"
+                f"Entendido, Geral. Para agendar tu evento para **\"{date_str or 'hoy'}\"**, por favor confírmame los siguientes campos:\n\n"
+                "1. 📌 **Título / Asunto**: ¿Qué nombre o asunto tendrá la reunión/evento?\n"
+                "2. ⏰ **Hora exacta y Duración**: (Ej: 4:00 PM, duración 1 hora)\n"
+                "3. 💻 **Enlace de Teams**: ¿Deseas incluir enlace a Microsoft Teams? (Sí / No)\n"
+                "4. 🏷️ **Etiqueta / Categoría**: ¿Deseas asignarle una categoría de color (ej: *Trabajo, Personal, Urgente*) o crear una etiqueta nueva?\n"
+                "5. 👥 **Invitados o Notas**: ¿Deseas invitar a alguien enviándole un correo o agregar notas adicionales?"
+            )
+
         target_time = None
-        try:
-            t_match = re.search(r'(\d{1,2}):(\d{2})', date_str)
+
+        # Parse AM/PM or HH:MM
+        pm_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', clean_date)
+        if pm_match:
+            hr = int(pm_match.group(1))
+            mn = int(pm_match.group(2)) if pm_match.group(2) else 0
+            ampm = pm_match.group(3)
+            if ampm == "pm" and hr < 12:
+                hr += 12
+            elif ampm == "am" and hr == 12:
+                hr = 0
+            target_time = (hr, mn)
+        else:
+            t_match = re.search(r'(\d{1,2}):(\d{2})', clean_date)
             if t_match:
                 target_time = (int(t_match.group(1)), int(t_match.group(2)))
 
-            d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', date_str)
+        # Determine target date
+        if "hoy" in clean_date:
+            base_dt = now
+        elif "mañana" in clean_date or "manana" in clean_date:
+            base_dt = now + timedelta(days=1)
+        elif "sábado" in clean_date or "sabado" in clean_date:
+            days_ahead = (5 - now.weekday()) % 7
+            if days_ahead == 0: days_ahead = 7
+            base_dt = now + timedelta(days=days_ahead)
+        elif "domingo" in clean_date:
+            days_ahead = (6 - now.weekday()) % 7
+            if days_ahead == 0: days_ahead = 7
+            base_dt = now + timedelta(days=days_ahead)
+        else:
+            d_match = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', clean_date)
             if d_match:
                 base_dt = datetime(int(d_match.group(1)), int(d_match.group(2)), int(d_match.group(3)))
             else:
-                d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', date_str)
+                d_match2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', clean_date)
                 if d_match2:
                     base_dt = datetime(int(d_match2.group(3)), int(d_match2.group(2)), int(d_match2.group(1)))
-                elif "mañana" in date_str.lower():
-                    base_dt = datetime.now() + timedelta(days=1)
-                elif "sábado" in date_str.lower() or "sabado" in date_str.lower():
-                    now = datetime.now()
-                    days_ahead = (5 - now.weekday()) % 7
-                    if days_ahead == 0: days_ahead = 7
-                    base_dt = now + timedelta(days=days_ahead)
-                elif "domingo" in date_str.lower():
-                    now = datetime.now()
-                    days_ahead = (6 - now.weekday()) % 7
-                    if days_ahead == 0: days_ahead = 7
-                    base_dt = now + timedelta(days=days_ahead)
                 else:
-                    base_dt = datetime.now() + timedelta(days=1)
-        except Exception:
-            base_dt = datetime.now() + timedelta(days=1)
+                    base_dt = now
 
         if auto_find_best_time:
             start_dt = self.find_best_time_slot(base_dt, duration_minutes)
         elif target_time:
-            start_dt = base_dt.replace(hour=target_time[0], minute=target_time[1], second=0)
+            start_dt = base_dt.replace(hour=target_time[0], minute=target_time[1], second=0, microsecond=0)
         else:
-            start_dt = base_dt.replace(hour=9, minute=0, second=0)
+            start_dt = base_dt.replace(hour=9, minute=0, second=0, microsecond=0)
 
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 
         payload = {
-            "subject": title,
+            "subject": clean_title,
             "start": {"dateTime": start_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
             "end": {"dateTime": end_dt.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "Central America Standard Time"},
             "isReminderOn": True,
@@ -168,12 +198,13 @@ class OutlookIntegration:
             payload["onlineMeetingProvider"] = "teamsForBusiness"
 
         if categories:
-            payload["categories"] = categories
+            payload["categories"] = categories if isinstance(categories, list) else [str(categories)]
 
         if attendees:
+            att_list = attendees if isinstance(attendees, list) else [str(attendees)]
             payload["attendees"] = [
                 {"emailAddress": {"address": a.strip()}, "type": "required"}
-                for a in attendees if a.strip()
+                for a in att_list if a and a.strip()
             ]
 
         url = "https://graph.microsoft.com/v1.0/me/events"
@@ -190,16 +221,23 @@ class OutlookIntegration:
             else:
                 rem_text = f"{reminder_minutes} min antes"
 
-            details_list = [f"✅ **Evento Creado en Outlook Calendar**: [{title}]({link})"]
-            details_list.append(f"⏰ *Fecha del Evento*: `{fmt_date}`")
-            details_list.append(f"🔔 *Notificación de Recordatorio*: `{rem_text}`")
+            details_list = [f"✅ **Evento Creado en Outlook Calendar**: [{clean_title}]({link})"]
+            details_list.append(f"⏰ *Fecha y Hora*: `{fmt_date}`")
+            details_list.append(f"⏱️ *Duración*: `{duration_minutes} min`")
+            details_list.append(f"🔔 *Recordatorio*: `{rem_text}`")
 
             if is_teams_meeting:
                 details_list.append("💻 *Reunión de Microsoft Teams*: `Activada`")
+            else:
+                details_list.append("💻 *Reunión de Microsoft Teams*: `No activada`")
+
             if categories:
-                details_list.append(f"🏷️ *Etiquetas/Categorías*: `{', '.join(categories)}`")
+                cat_str = ", ".join(categories) if isinstance(categories, list) else str(categories)
+                details_list.append(f"🏷️ *Etiquetas/Categorías*: `{cat_str}`")
+
             if attendees:
-                details_list.append(f"👥 *Invitaciones enviadas*: `{', '.join(attendees)}`")
+                att_str = ", ".join(attendees) if isinstance(attendees, list) else str(attendees)
+                details_list.append(f"👥 *Invitaciones enviadas*: `{att_str}`")
 
             return "\n".join(details_list)
         else:

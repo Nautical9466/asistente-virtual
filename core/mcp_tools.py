@@ -91,13 +91,17 @@ class MCPToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "create_calendar_event",
-                    "description": "Agenda un evento o reunión en el Calendario de Outlook.",
+                    "description": "Agenda un evento o reunión en el Calendario de Outlook con personalización completa (Teams, etiquetas/categorías, invitados, recordatorios).",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "title": {"type": "string", "description": "Título del evento"},
-                            "time_str": {"type": "string", "description": "Fecha y hora objetivo (ej: Mañana 15:00, 2026-10-10 10:00)"},
+                            "title": {"type": "string", "description": "Título claro del evento o reunión"},
+                            "date_str": {"type": "string", "description": "Fecha y hora objetivo (ej: Hoy 16:00, Mañana 15:00, 2026-10-10 10:00)"},
+                            "time_str": {"type": "string", "description": "Alias para fecha y hora objetivo"},
                             "duration_minutes": {"type": "integer", "description": "Duración en minutos (default 60)"},
+                            "is_teams_meeting": {"type": "boolean", "description": "Si debe incluir enlace a reunión de Microsoft Teams (default false)"},
+                            "categories": {"type": "array", "items": {"type": "string"}, "description": "Lista de etiquetas o categorías de color (ej: ['Trabajo', 'Importante'])"},
+                            "attendees": {"type": "array", "items": {"type": "string"}, "description": "Lista de correos de invitados"},
                             "description": {"type": "string", "description": "Detalles o notas del evento"}
                         },
                         "required": ["title"]
@@ -181,11 +185,17 @@ class MCPToolRegistry:
                 else:
                     return self.outlook.get_all_lists_grouped()
             elif name == "create_calendar_event":
+                date_val = args.get("date_str") or args.get("time_str") or args.get("timestr") or args.get("time") or "Hoy 16:00"
                 return self.outlook.create_event(
                     title=args.get("title", ""),
-                    time_str=args.get("time_str", "Mañana 09:00"),
+                    date_str=date_val,
                     duration_minutes=args.get("duration_minutes", 60),
-                    description=args.get("description", "")
+                    reminder_minutes=args.get("reminder_minutes", 1440),
+                    is_teams_meeting=args.get("is_teams_meeting", False),
+                    attendees=args.get("attendees", None),
+                    categories=args.get("categories", None),
+                    description=args.get("description", ""),
+                    auto_find_best_time=args.get("auto_find_best_time", False)
                 )
             elif name == "get_calendar_events":
                 return self.outlook.get_calendar_events(
