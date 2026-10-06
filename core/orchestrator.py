@@ -89,11 +89,12 @@ class GoalOrchestrator:
             "- move_outlook_task (task_query, destination_list_name, src_list_name_or_number)\n"
             "- manage_todo_lists (action: create/delete/consolidate_duplicates, list_name)\n"
             "- send_email (recipient, subject, body_content)\n"
-            "- general_query (para responder preguntas, conversar, investigar o redactar textos)\n\n"
+            "- general_query (para saludos, responder preguntas, conversar, investigar o redactar textos)\n\n"
             "REGLAS ESTRUCTURALES:\n"
-            "1. Si el usuario pide varias cosas en un mismo mensaje (ej: 'dame la agenda y borra la tarea 2 de la lista 1'), DEBES crear un objeto independiente en la lista 'goals' para CADA SOLICITUD.\n"
-            "2. Asigna 'priority': 1 al objetivo más urgente/primario, 'priority': 2 al siguiente, etc.\n"
-            "3. Responde ÚNICAMENTE en formato JSON plano válido con la clave principal 'goals'."
+            "1. Si el mensaje es un saludo simple (ej: 'hola', 'buenas'), asigna target_tool: general_query.\n"
+            "2. Si el usuario pide varias cosas en un mismo mensaje (ej: 'dame la agenda y borra la tarea 2 de la lista 1'), DEBES crear un objeto independiente en la lista 'goals' para CADA SOLICITUD.\n"
+            "3. Asigna 'priority': 1 al objetivo más urgente/primario, 'priority': 2 al siguiente, etc.\n"
+            "4. Responde ÚNICAMENTE en formato JSON plano válido con la clave principal 'goals'."
         )
 
         user_prompt = (
@@ -123,6 +124,15 @@ class GoalOrchestrator:
             {"role": "user", "content": user_prompt}
         ]
 
+        def _valid_json(content: str) -> Optional[Dict[str, Any]]:
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and "goals" in data and isinstance(data["goals"], list) and len(data["goals"]) > 0:
+                    return data
+            except Exception:
+                pass
+            return None
+
         from core.router import assistant
         if assistant.router:
             try:
@@ -132,22 +142,11 @@ class GoalOrchestrator:
                     response_format={"type": "json_object"}
                 )
                 if resp and resp.choices and resp.choices[0].message.content:
-                    return json.loads(resp.choices[0].message.content)
+                    parsed = _valid_json(resp.choices[0].message.content)
+                    if parsed:
+                        return parsed
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier Router Warning]: {e}")
-
-        if os.environ.get("GROQ_API_KEY"):
-            try:
-                resp = litellm.completion(
-                    model="groq/openai/gpt-oss-20b",
-                    messages=messages,
-                    api_key=os.environ.get("GROQ_API_KEY"),
-                    response_format={"type": "json_object"}
-                )
-                if resp and resp.choices and resp.choices[0].message.content:
-                    return json.loads(resp.choices[0].message.content)
-            except Exception as e:
-                logger.warning(f"[Orchestrator Classifier Groq Warning]: {e}")
 
         if os.environ.get("DEEPINFRA_API_KEY"):
             try:
@@ -158,9 +157,26 @@ class GoalOrchestrator:
                     response_format={"type": "json_object"}
                 )
                 if resp and resp.choices and resp.choices[0].message.content:
-                    return json.loads(resp.choices[0].message.content)
+                    parsed = _valid_json(resp.choices[0].message.content)
+                    if parsed:
+                        return parsed
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier DeepInfra Warning]: {e}")
+
+        if os.environ.get("GROQ_API_KEY"):
+            try:
+                resp = litellm.completion(
+                    model="groq/openai/gpt-oss-20b",
+                    messages=messages,
+                    api_key=os.environ.get("GROQ_API_KEY"),
+                    response_format={"type": "json_object"}
+                )
+                if resp and resp.choices and resp.choices[0].message.content:
+                    parsed = _valid_json(resp.choices[0].message.content)
+                    if parsed:
+                        return parsed
+            except Exception as e:
+                logger.warning(f"[Orchestrator Classifier Groq Warning]: {e}")
 
         if os.environ.get("GEMINI_API_KEY"):
             try:
@@ -171,7 +187,9 @@ class GoalOrchestrator:
                     response_format={"type": "json_object"}
                 )
                 if resp and resp.choices and resp.choices[0].message.content:
-                    return json.loads(resp.choices[0].message.content)
+                    parsed = _valid_json(resp.choices[0].message.content)
+                    if parsed:
+                        return parsed
             except Exception as ex:
                 logger.warning(f"[Orchestrator Classifier Gemini Warning]: {ex}")
 
@@ -183,7 +201,8 @@ class GoalOrchestrator:
         goals = []
         gid = 1
 
-        if any(w in low for w in ["agenda", "calendario", "evento", "reunión"]):
+        # Calendar/Agenda check
+        if any(w in low for w in ["agenda", "calendario", "evento", "eventos", "reunión", "reunion"]):
             goals.append({
                 "goal_id": gid,
                 "priority": gid,
@@ -194,7 +213,8 @@ class GoalOrchestrator:
             })
             gid += 1
 
-        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo"]):
+        # Tasks/To-Do check
+        if any(w in low for w in ["tarea", "tareas", "lista", "listas", "todo", "pendiente", "pendientes"]):
             if any(w in low for w in ["elimin", "borra"]):
                 goals.append({
                     "goal_id": gid,
@@ -248,21 +268,27 @@ class GoalOrchestrator:
     def _evaluate_and_summarize(self, user_input: str, execution_results: List[Dict[str, Any]], chat_type: str, chat_title: str, total_goals: int) -> str:
         """Node 3: Evaluates completion of all goals and formats Telegram output."""
         formatted_outputs = []
+        is_only_general = (total_goals == 1 and execution_results[0].get("tool_name") == "general_query")
+
         for item in execution_results:
-            formatted_outputs.append(item.get("result", ""))
+            res = item.get("result", "").strip()
+            if res:
+                formatted_outputs.append(res)
 
         combined_text = "\n\n".join(formatted_outputs)
 
-        # Custom closing phrase requested by user:
-        if total_goals == 1:
-            closing_phrase = "\n\n✨ *Se ha completado la tarea solicitada.*"
-        elif total_goals == 2:
-            closing_phrase = "\n\n✨ *Se han completado las dos tareas solicitadas.*"
-        else:
-            closing_phrase = f"\n\n✨ *Se han completado las {total_goals} tareas solicitadas.*"
+        # Do NOT append completion badge for plain general queries/greetings
+        if not is_only_general:
+            if total_goals == 1:
+                closing_phrase = "\n\n✨ *Se ha completado la tarea solicitada.*"
+            elif total_goals == 2:
+                closing_phrase = "\n\n✨ *Se han completado las dos tareas solicitadas.*"
+            else:
+                closing_phrase = f"\n\n✨ *Se han completado las {total_goals} tareas solicitadas.*"
+            combined_text += closing_phrase
 
         from core.router import clean_markdown_formatting
-        final_text = clean_markdown_formatting(combined_text + closing_phrase)
+        final_text = clean_markdown_formatting(combined_text)
         return final_text
 
 orchestrator = GoalOrchestrator()
