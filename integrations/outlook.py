@@ -91,36 +91,65 @@ class OutlookIntegration:
             return target_date.replace(hour=9, minute=0, second=0)
 
     def _parse_event_datetime(self, date_str: str) -> datetime:
-        """Helper to convert standard date/time string or ISO format into a datetime object."""
-        now = datetime.now()
+        """Helper to convert standard date/time string, ISO format, or relative time into a datetime object in user's local timezone (Central America CST, UTC-6)."""
+        import pytz
+        try:
+            tz_cst = pytz.timezone("America/Managua")
+            now = datetime.now(tz_cst).replace(tzinfo=None)
+        except Exception:
+            now = datetime.utcnow() - timedelta(hours=6)
+
         if not date_str or not str(date_str).strip():
             return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+        clean = str(date_str).lower().strip()
         
-        clean = str(date_str).strip()
+        # Direct ISO format
         try:
-            return datetime.fromisoformat(clean.replace("Z", "+00:00")).replace(tzinfo=None)
+            return datetime.fromisoformat(clean.replace("z", "+00:00")).replace(tzinfo=None)
         except Exception:
             pass
 
         import re
-        try:
-            # Match YYYY-MM-DD HH:MM or YYYY-MM-DD
-            m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2}))?', clean)
-            if m:
-                hr = int(m.group(4)) if m.group(4) is not None else 9
-                mn = int(m.group(5)) if m.group(5) is not None else 0
-                return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), hr, mn)
 
-            # Match DD/MM/YYYY HH:MM or DD/MM/YYYY
-            m2 = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s](\d{1,2}):(\d{2}))?', clean)
-            if m2:
-                hr = int(m2.group(4)) if m2.group(4) is not None else 9
-                mn = int(m2.group(5)) if m2.group(5) is not None else 0
-                return datetime(int(m2.group(3)), int(m2.group(2)), int(m2.group(1)), hr, mn)
-        except Exception:
-            pass
+        # Extract time (HH:MM or HH AM/PM)
+        hr, mn = 9, 0
+        has_time = False
 
-        return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        pm_match = re.search(r'(\d{1,2})(?::(\d{2}))?\s*(am|pm)', clean)
+        if pm_match:
+            hr = int(pm_match.group(1))
+            mn = int(pm_match.group(2)) if pm_match.group(2) else 0
+            ampm = pm_match.group(3)
+            if ampm == "pm" and hr < 12:
+                hr += 12
+            elif ampm == "am" and hr == 12:
+                hr = 0
+            has_time = True
+        else:
+            t_match = re.search(r'(\d{1,2}):(\d{2})', clean)
+            if t_match:
+                hr = int(t_match.group(1))
+                mn = int(t_match.group(2))
+                has_time = True
+
+        # Extract date (YYYY-MM-DD, DD/MM/YYYY, or relative 'mañana')
+        base_date = now
+
+        m_iso = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', clean)
+        if m_iso:
+            base_date = datetime(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+        else:
+            m_lat = re.search(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', clean)
+            if m_lat:
+                base_date = datetime(int(m_lat.group(3)), int(m_lat.group(2)), int(m_lat.group(1)))
+            elif "mañana" in clean or "manana" in clean:
+                base_date = now + timedelta(days=1)
+
+        if has_time:
+            return base_date.replace(hour=hr, minute=mn, second=0, microsecond=0)
+        else:
+            return base_date.replace(hour=9, minute=0, second=0, microsecond=0)
 
     def create_event(
         self,

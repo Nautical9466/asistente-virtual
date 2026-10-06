@@ -78,8 +78,16 @@ class GoalOrchestrator:
 
     def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str, user_id: str = "default") -> Dict[str, Any]:
         """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
-        from datetime import datetime
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S (%A)")
+        from datetime import datetime, timedelta
+        import pytz
+
+        try:
+            tz_cst = pytz.timezone("America/Managua")
+            now_cst = datetime.now(tz_cst)
+        except Exception:
+            now_cst = datetime.utcnow() - timedelta(hours=6)
+
+        now_str = now_cst.strftime("%Y-%m-%d %H:%M:%S (%A, Hora Local América Central UTC-6)")
 
         system_prompt = (
             "Eres el Orquestador Inteligente y Analista de Lenguaje Natural de Claudia OS / Jarvis.\n"
@@ -98,9 +106,9 @@ class GoalOrchestrator:
             "- send_email (recipient: str, subject: str, body_content: str)\n"
             "- general_query (query: str) -> Usar para conversación general, aclaraciones, preguntas al usuario o cuando falten datos obligatorios.\n\n"
             "REGLAS DE RAZONAMIENTO Y CLASIFICACIÓN:\n"
-            "1. CONVERSIÓN DE FECHAS: Utiliza la fecha y hora actual del sistema para convertir expresiones relativas (ej: 'hoy 3 pm', 'mañana a las 10', 'este viernes 4pm') a fechas ISO exactas (ej: '2026-10-06 15:00').\n"
-            "2. EVENTOS INCOMPLETOS: Si el usuario pide crear un evento pero NO ha dado suficiente información (falta título/asunto), asigna target_tool: general_query solicitando interactivamente los datos del evento.\n"
-            "3. CONTINUIDAD DE DETALLES: Si el usuario está respondiendo a una pregunta previa sobre los detalles de un evento (ej: 'ponle cualquier cosa de asunto, dure 15 mins...'), usa el HISTORIAL RECIENTE para combinar los datos anteriores (fecha/hora) con los nuevos. Si dice 'ponle cualquier cosa', extrae un título descriptivo adecuado basado en la nota o la categoría (ej: 'Evento de prueba').\n"
+            "1. CONVERSIÓN DE FECHAS: Utiliza la fecha y hora actual del usuario (UTC-6) para convertir expresiones relativas (ej: 'hoy 5 pm', 'mañana a las 10') a formato de fecha ISO exacto (ej: '2026-10-06 17:00').\n"
+            "2. PRESERVACIÓN DE HORA Y CONTINUIDAD: Cuando el usuario responda a una pregunta previa proporcionando detalles del evento (ej: 'ponle cualquier cosa de titulo, dure 15m...'), DEBES revisar el HISTORIAL RECIENTE para recuperar y PRESERVAR la hora que el usuario pidió en el primer mensaje (ej: si pidió 'para hoy a las 5 pm', date_str DEBE SER '2026-10-06 17:00'). NUNCA reemplaces la hora solicitada por la hora actual de envío del mensaje.\n"
+            "3. TÍTULOS CASUALES: Si el usuario dice 'ponle cualquier cosa de titulo', asigna un título descriptivo adecuado basado en la nota/descripción dada (ej: 'Test de Asistente virtual' o 'Evento de prueba').\n"
             "4. MÚLTIPLES INTENCIONES: Genera un objeto en 'goals' para CADA meta si hay varias peticiones.\n"
             "5. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
