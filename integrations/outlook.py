@@ -894,8 +894,8 @@ class OutlookIntegration:
             return f"❌ Error al renombrar lista ({patch_res.status_code}): {patch_res.text}"
 
 
-    def get_all_lists_grouped(self) -> str:
-        """Retrieves all Outlook To-Do lists and groups tasks by list."""
+    def get_all_lists_grouped(self, hide_empty: bool = True) -> str:
+        """Retrieves all Outlook To-Do lists and groups tasks by list (omitting empty lists if hide_empty is True)."""
         token, err_detail = self._get_access_token_detail()
         if not token:
             return f"📋 **Listas de Outlook (Modo Simulación)**:\n{err_detail}"
@@ -907,7 +907,7 @@ class OutlookIntegration:
 
         lists_url = "https://graph.microsoft.com/v1.0/me/todo/lists"
         try:
-            res = requests.get(lists_url, headers=headers, timeout=10)
+            res = requests.get(lists_url, headers=headers, timeout=8)
             if res.status_code != 200:
                 return f"❌ Error consultando listas ({res.status_code}): {res.text}"
 
@@ -915,20 +915,37 @@ class OutlookIntegration:
             if not todo_lists:
                 return "📁 No tienes listas registradas en tu cuenta de Outlook To-Do."
 
+            # Parallel fetch tasks across all lists
+            status_code, all_tasks, err_msg = self._fetch_all_outlook_tasks(headers)
+            if status_code != 200:
+                return f"❌ Error al consultar tareas de Outlook ({status_code}): {err_msg}"
+
+            # Group tasks by list ID
+            tasks_by_list = {}
+            for t in all_tasks:
+                lid = t.get("_list_id")
+                if lid not in tasks_by_list:
+                    tasks_by_list[lid] = []
+                tasks_by_list[lid].append(t)
+
             output_lines = [
-                "📁 **TODAS TUS LISTAS EN OUTLOOK TO-DO Y SUS TAREAS**",
+                "📁 **TUS LISTAS DE OUTLOOK TO-DO Y TAREAS PENDIENTES**",
                 "───────────────────────────\n"
             ]
 
             total_all_tasks = 0
+            active_lists_count = 0
+
             for l_idx, l in enumerate(todo_lists, start=1):
                 lid = l.get("id")
                 lname = l.get("displayName", "Sin nombre")
+                tasks = tasks_by_list.get(lid, [])
 
-                url_tasks = f"https://graph.microsoft.com/v1.0/me/todo/lists/{lid}/tasks?$filter=status ne 'completed'&$top=50"
-                t_res = requests.get(url_tasks, headers=headers, timeout=8)
-                tasks = t_res.json().get("value", []) if t_res.status_code == 200 else []
+                if not tasks and hide_empty:
+                    continue
+
                 total_all_tasks += len(tasks)
+                active_lists_count += 1
 
                 output_lines.append(f"📂 **Lista {l_idx}: {lname}** (`{len(tasks)} pendientes`)")
                 if not tasks:
@@ -939,8 +956,11 @@ class OutlookIntegration:
                         output_lines.append(f"   {l_idx}.{t_idx} {title}")
                     output_lines.append("")
 
+            if total_all_tasks == 0:
+                return "📋 **TUS TAREAS PENDIENTES (Outlook To-Do)**:\n\n🎉 ¡Excelente! No tienes tareas pendientes en ninguna de tus listas."
+
             output_lines.append("───────────────────────────")
-            output_lines.append(f"💡 *Total de Listas*: `{len(todo_lists)}` | *Total Pendientes*: `{total_all_tasks}`")
+            output_lines.append(f"💡 *Listas con Pendientes*: `{active_lists_count}` | *Total Pendientes*: `{total_all_tasks}`")
             output_lines.append("\n💡 *Tip para gestionar rápidamente:* Puedes decirme: *\"Elimina las tareas 1 y 2 de la lista 1\"* o *\"Mueve la tarea 3 de la lista 1 a la lista 2\"*.")
 
             return "\n".join(output_lines)
