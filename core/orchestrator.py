@@ -78,15 +78,10 @@ class GoalOrchestrator:
 
     def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str, user_id: str = "default") -> Dict[str, Any]:
         """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
-        from datetime import datetime, timedelta
-        import pytz
+        from datetime import datetime, timedelta, timezone
 
-        try:
-            tz_cst = pytz.timezone("America/Managua")
-            now_cst = datetime.now(tz_cst)
-        except Exception:
-            now_cst = datetime.utcnow() - timedelta(hours=6)
-
+        cst_tz = timezone(timedelta(hours=-6))
+        now_cst = datetime.now(cst_tz)
         now_str = now_cst.strftime("%Y-%m-%d %H:%M:%S (%A, Hora Local América Central UTC-6)")
 
         system_prompt = (

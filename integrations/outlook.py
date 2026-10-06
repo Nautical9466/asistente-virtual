@@ -92,12 +92,9 @@ class OutlookIntegration:
 
     def _parse_event_datetime(self, date_str: str) -> datetime:
         """Helper to convert standard date/time string, ISO format, or relative time into a datetime object in user's local timezone (Central America CST, UTC-6)."""
-        import pytz
-        try:
-            tz_cst = pytz.timezone("America/Managua")
-            now = datetime.now(tz_cst).replace(tzinfo=None)
-        except Exception:
-            now = datetime.utcnow() - timedelta(hours=6)
+        from datetime import timezone
+        cst_tz = timezone(timedelta(hours=-6))
+        now = datetime.now(cst_tz).replace(tzinfo=None)
 
         if not date_str or not str(date_str).strip():
             return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
