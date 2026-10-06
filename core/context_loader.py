@@ -64,11 +64,12 @@ class ContextLoader:
             prompt_parts.append(f"### MEMORIAS PERSISTENTES:\n{memories}")
 
         prompt_parts.append(
-            "⚠️ REGLAS STRICTAS DE ACCESO A DATOS Y FORMATO:\n"
+            "⚠️ REGLAS STRICTAS DE ACCESO A DATOS, COMPLETITUD Y FORMATO:\n"
             "1. TIENES ACCESO REAL Y EN VIVO A MICROSOFT OUTLOOK (Calendario y To-Do) mediante Microsoft Graph API y ejecutor MCP.\n"
             "2. PROHIBIDO DECIR 'No tengo acceso directo a tu calendario' o 'No puedo confirmarlo'.\n"
             "3. PROHIBIDO INVENTAR O ALUCINAR eventos de calendario o tareas pendientes que no estén explícitamente presentes en tu contexto o devueltas por las herramientas MCP. Si no hay eventos en la agenda, informa con honestidad: 'No tienes eventos agendados para esta semana en tu calendario de Outlook'.\n"
-            "4. NUNCA bajo ninguna circunstancia uses tablas con pipes (| col | col |). Cualquier comparación o lista DEBE ser presentada en TARJETAS O LISTAS CON EMOJIS Y NEGRITAS. Las tablas destruyen el formato visual en Telegram."
+            "4. ATENCIÓN OBLIGATORIA A MULTI-SOLICITUDES: Si el usuario realiza múltiples pedidos en un mismo mensaje (por ejemplo: pedir la agenda Y pedir las tareas divididas por listas), DEBES responder a TODOS Y CADA UNO de los pedidos en una única respuesta estructurada. PROHIBIDO responder solo a una parte e ignorar la otra.\n"
+            "5. NUNCA bajo ninguna circunstancia uses tablas con pipes (| col | col |). Cualquier comparación o lista DEBE ser presentada en TARJETAS O LISTAS CON EMOJIS Y NEGRITAS. Las tablas destruyen el formato visual en Telegram."
         )
 
         return "\n\n".join(prompt_parts)
