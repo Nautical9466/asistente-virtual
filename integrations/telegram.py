@@ -40,7 +40,16 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             user_id = str(update.message.from_user.id)
             user_text = update.message.text
 
-            response = message_handler_callback(user_text, user_id)
+            chat_type = update.message.chat.type if update.message and update.message.chat else "private"
+            chat_title = (update.message.chat.title if update.message and update.message.chat else None) or update.message.from_user.first_name or "Chat Directo"
+
+            origin_metadata = {
+                "chat_type": chat_type,
+                "chat_title": chat_title,
+                "user_id": user_id
+            }
+
+            response = message_handler_callback(user_text, user_id, origin_metadata)
 
 
 

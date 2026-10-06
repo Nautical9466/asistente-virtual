@@ -27,10 +27,10 @@ def get_outlook_client_id() -> str:
         return REAL_CLIENT_ID
     return cid
 
-def handle_incoming_message(user_input: str, user_id: str = "default") -> str:
+def handle_incoming_message(user_input: str, user_id: str = "default", origin_metadata: dict = None) -> str:
     """Central processing logic for messages from Telegram, WhatsApp, or Web."""
     try:
-        return assistant.query(user_input, user_id)
+        return assistant.query(user_input, user_id, origin_metadata=origin_metadata)
     except Exception as e:
         logger.error(f"Error processing message for user {user_id}: {e}")
         return f"❌ Lo siento, ocurrió un error al procesar tu solicitud: {e}"
