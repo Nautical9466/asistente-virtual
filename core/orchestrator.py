@@ -149,6 +149,19 @@ class GoalOrchestrator:
             except Exception as e:
                 logger.warning(f"[Orchestrator Classifier Groq Warning]: {e}")
 
+        if os.environ.get("DEEPINFRA_API_KEY"):
+            try:
+                resp = litellm.completion(
+                    model="deepinfra/meta-llama/Llama-3.3-70B-Instruct",
+                    messages=messages,
+                    api_key=os.environ.get("DEEPINFRA_API_KEY"),
+                    response_format={"type": "json_object"}
+                )
+                if resp and resp.choices and resp.choices[0].message.content:
+                    return json.loads(resp.choices[0].message.content)
+            except Exception as e:
+                logger.warning(f"[Orchestrator Classifier DeepInfra Warning]: {e}")
+
         if os.environ.get("GEMINI_API_KEY"):
             try:
                 resp = litellm.completion(

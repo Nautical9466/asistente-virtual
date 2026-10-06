@@ -70,10 +70,19 @@ class VirtualAssistant:
             except Exception as e:
                 logger.warning(f"[VirtualAssistant] Direct Groq completion warning: {e}")
 
+        if not assistant_response and os.environ.get("DEEPINFRA_API_KEY"):
+            try:
+                resp = litellm.completion(model="deepinfra/meta-llama/Llama-3.3-70B-Instruct", messages=messages, api_key=os.environ.get("DEEPINFRA_API_KEY"))
+                if resp and resp.choices:
+                    assistant_response = resp.choices[0].message.content
+            except Exception as e:
+                logger.warning(f"[VirtualAssistant] Direct DeepInfra completion warning: {e}")
+
         if not assistant_response and os.environ.get("GEMINI_API_KEY"):
             try:
                 resp = litellm.completion(model="gemini/gemini-3.8-flash", messages=messages, api_key=os.environ.get("GEMINI_API_KEY"))
-                assistant_response = resp.choices[0].message.content
+                if resp and resp.choices:
+                    assistant_response = resp.choices[0].message.content
             except Exception as e:
                 logger.warning(f"[VirtualAssistant] Direct Gemini completion warning: {e}")
 

@@ -35,8 +35,10 @@ def handle_incoming_message(user_input: str, user_id: str = "default", origin_me
         logger.error(f"Error processing message for user {user_id}: {e}")
         return f"❌ Lo siento, ocurrió un error al procesar tu solicitud: {e}"
 
-# Start Telegram Bot polling in background thread if configured
-telegram_active = setup_telegram_bot(handle_incoming_message)
+# Start Telegram Bot polling in background thread if configured and not disabled
+telegram_active = False
+if not os.environ.get("DISABLE_TELEGRAM_BOT") and os.environ.get("TELEGRAM_BOT_TOKEN"):
+    telegram_active = setup_telegram_bot(handle_incoming_message)
 
 @app.route("/", methods=["GET"])
 def health_check():
