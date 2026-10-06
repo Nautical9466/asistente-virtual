@@ -8,6 +8,45 @@ logger = logging.getLogger(__name__)
 
 telegram_app = None
 
+async def send_telegram_chunked_message(update, text: str):
+    """Splits long responses into Telegram-friendly chunks (max 3800 chars) and sends them sequentially."""
+    if not text or not str(text).strip():
+        return
+
+    MAX_LENGTH = 3800
+    if len(text) <= MAX_LENGTH:
+        try:
+            await update.message.reply_text(text, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(text)
+        return
+
+    lines = text.split("\n")
+    current_chunk = []
+    current_len = 0
+
+    for line in lines:
+        if current_len + len(line) + 1 > MAX_LENGTH:
+            chunk_text = "\n".join(current_chunk)
+            if chunk_text.strip():
+                try:
+                    await update.message.reply_text(chunk_text, parse_mode="Markdown")
+                except Exception:
+                    await update.message.reply_text(chunk_text)
+            current_chunk = [line]
+            current_len = len(line)
+        else:
+            current_chunk.append(line)
+            current_len += len(line) + 1
+
+    if current_chunk:
+        chunk_text = "\n".join(current_chunk)
+        if chunk_text.strip():
+            try:
+                await update.message.reply_text(chunk_text, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(chunk_text)
+
 def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> bool:
     """Configures Telegram Bot with photo receipt processing, smart AI intent routing, and Outlook integrations."""
     global telegram_app
@@ -53,14 +92,7 @@ def setup_telegram_bot(message_handler_callback: Callable[[str, str], str]) -> b
             if not response or not str(response).strip():
                 response = "⚠️ No se obtuvo respuesta para esta consulta."
 
-            try:
-                await update.message.reply_text(response, parse_mode="Markdown")
-            except Exception as e:
-                logger.warning(f"[Telegram] Markdown send failed ({e}), sending plain text fallback.")
-                try:
-                    await update.message.reply_text(response)
-                except Exception as e2:
-                    logger.error(f"[Telegram] Plain text send failed too: {e2}")
+            await send_telegram_chunked_message(update, response)
 
 
         async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
