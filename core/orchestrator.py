@@ -55,6 +55,9 @@ class GoalOrchestrator:
 
             if tool_name == "general_query":
                 res = self._execute_general_query(params.get("query", user_input), user_id)
+            elif tool_name == "request_event_details":
+                date_val = params.get("date_str", "la fecha solicitada")
+                res = self._format_event_details_request(date_val)
             else:
                 try:
                     res = mcp_registry.execute_tool(tool_name, params)
@@ -76,6 +79,21 @@ class GoalOrchestrator:
 
         return final_response
 
+    def _format_event_details_request(self, date_str: str) -> str:
+        """Formats clean, non-hallucinated questionnaire when user requests event creation without a title."""
+        return (
+            "📋 **CREACIÓN DE EVENTO EN OUTLOOK CALENDAR**\n"
+            "───────────────────────────\n\n"
+            f"Entendido, Geral. He registrado tu solicitud para **{date_str}**.\n\n"
+            "Para agendar el evento en tu calendario con los detalles correctos, por favor confírmame:\n"
+            "1. 📌 **Título / Asunto**: ¿Qué nombre o asunto tendrá la reunión/evento?\n"
+            "2. ⏱️ **Duración**: ¿Cuántos minutos durará? (Por defecto: 60 min)\n"
+            "3. 💻 **Enlace de Teams**: ¿Deseas incluir enlace a Microsoft Teams? (Sí / No)\n"
+            "4. 🏷️ **Etiqueta / Categoría**: ¿Deseas asignarle una categoría de color (ej: *Trabajo, Personal, Urgente*)?\n"
+            "5. 👥 **Invitados o Notas**: ¿Deseas invitar a alguien enviándole un correo o agregar notas adicionales?\n\n"
+            "En cuanto me respondas con estos datos, lo programaré de inmediato."
+        )
+
     def _classify_and_decompose(self, user_input: str, chat_type: str, chat_title: str, user_id: str = "default") -> Dict[str, Any]:
         """Node 1: Pure LLM reasoning engine to decompose any natural language input into structured goals JSON."""
         from datetime import datetime, timedelta, timezone
@@ -92,6 +110,7 @@ class GoalOrchestrator:
             "HERRAMIENTAS MCP DISPONIBLES:\n"
             "- get_calendar_events (days_ahead: int)\n"
             "- create_calendar_event (title: str, date_str: str, duration_minutes: int, is_teams_meeting: bool, categories: list, attendees: list, description: str)\n"
+            "- request_event_details (date_str: str) -> Usar OBLIGATORIAMENTE cuando el usuario pida agendar un evento pero NO proporcione el título/asunto exacto en su mensaje. NUNCA inventes personas o datos falsos.\n"
             "- get_outlook_tasks (include_details: bool)\n"
             "- create_outlook_task (title: str, description: str, list_name: str)\n"
             "- complete_outlook_task (task_query: str, list_name_or_number: str)\n"
@@ -99,11 +118,11 @@ class GoalOrchestrator:
             "- move_outlook_task (task_query: str, destination_list_name: str)\n"
             "- manage_todo_lists (action: str, list_name: str)\n"
             "- send_email (recipient: str, subject: str, body_content: str)\n"
-            "- general_query (query: str) -> Usar para conversación general, aclaraciones, preguntas al usuario o cuando falten datos obligatorios.\n\n"
+            "- general_query (query: str) -> Usar únicamente para conversación general, consultas informativas o saludos.\n\n"
             "REGLAS DE RAZONAMIENTO Y CLASIFICACIÓN:\n"
-            "1. CONVERSIÓN DE FECHAS: Utiliza la fecha y hora actual del usuario (UTC-6) para convertir expresiones relativas (ej: 'hoy 5 pm', 'mañana a las 8 am') a formato de fecha ISO exacto (ej: '2026-10-07 08:00').\n"
-            "2. EVENTO NUEVO SIN TÍTULO/DETALLES: Si el usuario pide crear un evento (ej: 'Quiero que crees un evento para mañana a las 8 am') pero NO especifica un título/asunto exacto en su mensaje inicial, NO DEBES crear el evento con un título inventado ni usar 'Evento de prueba'. DEBES seleccionar target_tool: general_query respondiendo conversacionalmente al usuario y solicitando los datos faltantes (📌 Título/Asunto, ⏰ Duración, 💻 Enlace a Teams, 🏷️ Categoría, 👥 Invitados/Notas) e indicando la fecha/hora recibida.\n"
-            "3. CONTINUIDAD Y PRESERVACIÓN: Si el usuario responde a las preguntas previas sobre un evento (ej: 'ponle cualquier cosa de titulo...', 'duración 15m...'), DEBES seleccionar target_tool: create_calendar_event recuperando la fecha/hora del primer mensaje en el HISTORIAL RECIENTE (ej: '2026-10-07 08:00'). Si dice 'ponle cualquier cosa', extrae un título descriptivo adecuado del texto de las notas o categorías (ej: 'Test de Asistente virtual'). NUNCA inventes 'Evento de prueba' si la nota tiene otro texto.\n"
+            "1. CONVERSIÓN DE FECHAS: Utiliza la fecha y hora actual del usuario (UTC-6) para convertir expresiones relativas (ej: 'hoy 5 pm', 'mañana a las 9 am') a formato de fecha ISO exacto (ej: '2026-10-07 09:00').\n"
+            "2. EVENTO NUEVO SIN TÍTULO: Si el usuario pide crear un evento (ej: 'Quiero que crees un evento para mañana a las 9 am') pero NO especifica un título/asunto exacto en su mensaje inicial, DEBES seleccionar target_tool: request_event_details pasando date_str con la fecha/hora solicitada (ej: '2026-10-07 09:00'). NUNCA inventes nombres de personas o reuniones ni uses general_query.\n"
+            "3. CONTINUIDAD Y PRESERVACIÓN: Si el usuario responde a las preguntas previas sobre un evento (ej: 'ponle cualquier cosa de titulo...', 'duración 15m...'), DEBES seleccionar target_tool: create_calendar_event recuperando la fecha/hora del primer mensaje en el HISTORIAL RECIENTE (ej: '2026-10-07 09:00'). Si dice 'ponle cualquier cosa', extrae un título descriptivo adecuado del texto de las notas o categorías.\n"
             "4. MÚLTIPLES INTENCIONES: Genera un objeto en 'goals' para CADA meta si hay varias peticiones.\n"
             "5. Responde ÚNICAMENTE con un JSON plano estructurado válido."
         )
